@@ -83,9 +83,10 @@ var DEFAULT_SETTINGS = [
   ['CURRENCY_SYMBOL', '$', 'Currency symbol shown before prices.'],
 
   // --- Access control ---
-  ['ALLOWED_DOMAINS', 'yourschool.org', 'Comma-separated email domains for teachers/staff who may order (e.g. yourschool.org). Shop staff must also be on one of these domains.'],
+  ['ALLOWED_DOMAINS', 'yourschool.org', 'Comma-separated school email domains (e.g. district.org). Accounts here are treated as teachers/staff UNLESS they match STUDENT_EMAIL_PATTERN. Shop staff must be teachers/staff on one of these domains.'],
+  ['STUDENT_EMAIL_PATTERN', '^[0-9]{3,9}', 'Pattern for the part of an email BEFORE the @ that identifies a STUDENT on a shared domain. Default: starts with 3-9 digits (e.g. 1111111@district.org). Matching accounts are students, even on ALLOWED_DOMAINS. Blank = do not detect students by pattern.'],
   ['STUDENT_DOMAINS', '', 'Comma-separated STUDENT email domains (e.g. students.yourschool.org). Leave blank until students are allowed.'],
-  ['STUDENT_ORDERING_ENABLED', false, 'TRUE lets users on STUDENT_DOMAINS place orders. Students can NEVER see the shop dashboard.'],
+  ['STUDENT_ORDERING_ENABLED', false, 'TRUE lets students (matching STUDENT_EMAIL_PATTERN or on STUDENT_DOMAINS) place orders. Students can NEVER see the shop dashboard.'],
 
   // --- Ordering hours ---
   ['ORDERING_ENABLED', true, 'Master switch. FALSE closes ordering for everyone (e.g. shop closed today).'],

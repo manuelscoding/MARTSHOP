@@ -208,8 +208,9 @@ Things you might want to change live in **three places**. Always use the first o
 ## 10. Access control
 
 **What it does.**
-- **Customer side:** only signed-in users on `ALLOWED_DOMAINS` (or `STUDENT_DOMAINS`, when enabled) can order.
-- **Dashboard:** open only to people listed in the **Staff** tab, who must also be on `ALLOWED_DOMAINS`.
+- **Who is a student?** On `ALLOWED_DOMAINS` (e.g. `district.org`), any account whose part before the @ matches `STUDENT_EMAIL_PATTERN` is a **student**. The default pattern is "starts with 3–9 digits", e.g. `1111111@district.org`. Every other account on that domain is **teacher/staff**, e.g. `firstname.lastname@`, `f.lastname@`, `flastname@`.
+- **Customer side:** teachers and staff can order. Students can order only when `STUDENT_ORDERING_ENABLED` is `TRUE`; until then they see "Access denied".
+- **Dashboard:** open only to teacher/staff accounts listed in the **Staff** tab. A student account is refused even if it is listed.
 - These checks run on the server in **every** function. The deployment setting "Anyone within yourschool.org" is an extra outer fence.
 
 **Where it lives.**
@@ -219,7 +220,7 @@ Things you might want to change live in **three places**. Always use the first o
 
 **How to change it safely.**
 - **Add or remove shop staff:** edit the **Staff** tab, then **Clear settings cache**. `Role` is `Admin` or `Staff`. Both can use the dashboard today; `Admin` is there for future admin-only features (see `ctx.staffRole`).
-- **Add a domain:** add it to `ALLOWED_DOMAINS`, separated by commas (e.g. `yourschool.org, district.org`).
+- **Add a domain:** add it to `ALLOWED_DOMAINS`, separated by commas (e.g. `district.org, otherschool.org`). The student pattern applies to every domain in this list.
 - **Never** remove a `requireCustomer_()` / `requireStaff_()` line from a function that has one.
 - If you write a **new** browser-callable function, wrap it the same way: `return api_('name', function () { var ctx = requireStaff_(); ... });`.
 
@@ -229,14 +230,36 @@ Things you might want to change live in **three places**. Always use the first o
 
 Everything below is **off by default**. Do this in a test copy first (see [Testing changes safely](#testing-changes-safely)), and get approval from your principal and your district technology/privacy office.
 
-### A. Adding a student domain or organizational unit
+### A. Telling students apart from teachers
 
-**Student domain (built in).**
-1. In Settings, set `STUDENT_DOMAINS` to your student domain, e.g. `students.yourschool.org`.
-2. Set `STUDENT_ORDERING_ENABLED` to `TRUE`.
-3. Clear the cache.
+**Your district: students and teachers share `@district.org` (built in, already set up).**
 
-**Important technical check.** The app can identify users only if they are in the **same Google Workspace organization** as the owner. Many districts set up the student domain as a *secondary domain* of the same organization, and then it works. If students are in a **separate** Google Workspace organization:
+Student accounts start with numbers (`1111111@district.org`). Teacher accounts are names (`firstname.lastname@`, `F.Lastname@`, `FLastname@`). The app tells them apart with the Settings value **`STUDENT_EMAIL_PATTERN`**, which is checked against the part of the email **before the @**:
+
+| Email | Before the @ | Treated as |
+|---|---|---|
+| `1111111@district.org` | `1111111` | **Student** |
+| `123@district.org`, `123456789@district.org` | 3–9 digits | **Student** |
+| `firstname.lastname@district.org` | letters | Teacher/staff |
+| `F.Lastname@district.org`, `FLastname@district.org` | letters | Teacher/staff |
+| `jsmith2@district.org` | starts with a letter | Teacher/staff |
+
+- The default pattern is `^[0-9]{3,9}`, meaning "starts with 3 to 9 digits". Any account that **starts** with 3 or more digits counts as a student, even if letters follow.
+- Students are recognised **from day one**, even while student ordering is off. Until you enable it, they get "Access denied" instead of being treated as staff. They can never reach the shop dashboard.
+- **To let students order:**
+  1. Make sure `ALLOWED_DOMAINS` is `district.org`.
+  2. Set `STUDENT_ORDERING_ENABLED` to `TRUE`.
+  3. Choose **Coffee Shop → Clear settings cache**.
+- **If the format ever changes**, edit `STUDENT_EMAIL_PATTERN`. Examples:
+  - exactly 7 digits and nothing else: `^[0-9]{7}$`
+  - starts with `s` then digits (e.g. `s1234567`): `^s[0-9]+$`
+
+  Test a new pattern with one student and one teacher account. If the pattern is typed wrongly, the app falls back to the default and records a warning in the **Errors** tab. It never turns students into staff.
+- **Staff with unusual accounts.** If a staff account starts with digits (e.g. `123office@district.org`), it will be treated as a student. Use a name-based account for the shop, or ask a developer to add an exceptions list.
+
+**Separate student domain (also supported).** If students ever get their own domain, e.g. `students.district.org`, put it in `STUDENT_DOMAINS`. Every account on that domain is a student.
+
+**Important technical check (separate domains only).** The app can identify users only if they are in the **same Google Workspace organization** as the owner. Many districts set up the student domain as a *secondary domain* of the same organization, and then it works. If students are in a **separate** Google Workspace organization:
 - the app sees a blank email and shows "We could not confirm your account"
 - the deployment option "Anyone within yourschool.org" also won't let them in
 
@@ -264,11 +287,11 @@ if (customerType === CONFIG.CUSTOMER_TYPES.STAFF) {
 ### B. Separating student and staff permissions
 
 This is already built in:
-- A student-domain account **can never** open the shop dashboard or call any staff function, even if someone lists it in the Staff tab. `getUserContext_()` only looks up the Staff tab for `ALLOWED_DOMAINS` accounts.
+- A student account (matching `STUDENT_EMAIL_PATTERN` or on `STUDENT_DOMAINS`) **can never** open the shop dashboard or call any staff function, even if someone lists it in the Staff tab. `getUserContext_()` only looks up the Staff tab for teacher/staff accounts.
 - Each order records `CustomerType` (`Staff`/`Student`), and student orders show a purple **STUDENT** badge on the dashboard.
 - Student rules come from `getRules_()` in `Auth.gs`. This is the one place to add more student-only restrictions.
 
-If student **helpers** will work the counter, give them a staff-domain account, or an adult supervises using their own account. Don't loosen the domain rule.
+If student **helpers** will work the counter, an adult supervises using their own account. Don't loosen the student rule.
 
 ### C. Delivery rules for students
 

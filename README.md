@@ -39,7 +39,8 @@ A web app for a school coffee shop run by staff. It uses a Google Sheet as the d
    - optional ordering hours, a per-customer limit on active orders, and an optional "ready" email
    - optional auto-cancel of orders where the customer never responded
    - optional archiving of old orders
-9. **Accounts outside your domain.** `Session.getActiveUser()` returns the visitor's email only when they are in the same Google Workspace organization as the script owner. See the student section of the maintenance guide.
+9. **Students and teachers share one domain.** On `district.org`, accounts whose part before the @ starts with 3–9 digits (e.g. `1111111@`) are **students**. Name-style accounts (`firstname.lastname@`, `f.lastname@`, `flastname@`) are **teachers/staff**. This is controlled by the `STUDENT_EMAIL_PATTERN` setting. Students are denied until `STUDENT_ORDERING_ENABLED` is `TRUE`, and they can never open the dashboard.
+10. **Accounts outside your domain.** `Session.getActiveUser()` returns the visitor's email only when they are in the same Google Workspace organization as the script owner. See the student section of the maintenance guide.
 
 ## Files (`src/`)
 

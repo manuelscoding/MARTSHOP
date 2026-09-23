@@ -5,10 +5,12 @@
  * first. The deployment's "Anyone within <domain>" setting is the first
  * fence; these checks are the second, and they never trust the browser.
  *
- *   User type      How it is decided                         Can order?   Shop dashboard?
- *   Staff          email domain is in ALLOWED_DOMAINS        yes          only if listed in Staff sheet
- *   Student        email domain is in STUDENT_DOMAINS        if STUDENT_ORDERING_ENABLED   NEVER
- *   Anyone else    —                                         no           no
+ *   User type   How it is decided                                    Can order?                    Shop dashboard?
+ *   Student     domain in ALLOWED_DOMAINS and the part before the @   if STUDENT_ORDERING_ENABLED   NEVER
+ *               matches STUDENT_EMAIL_PATTERN (e.g. 1111111@...),
+ *               OR domain in STUDENT_DOMAINS
+ *   Staff       any other account on ALLOWED_DOMAINS                  yes                           only if listed in Staff sheet
+ *   Anyone else —                                                     no                            no
  */
 
 var ctxMemo_ = null;
@@ -22,11 +24,17 @@ function getUserContext_() {
   try { email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase(); } catch (e) { email = ''; }
   var domain = email.indexOf('@') > 0 ? email.split('@').pop() : '';
 
+  var localPart = email.indexOf('@') > 0 ? email.split('@')[0] : '';
+
   var customerType = null;
-  if (domain && splitList_(s.ALLOWED_DOMAINS).indexOf(domain) !== -1) {
-    customerType = CONFIG.CUSTOMER_TYPES.STAFF;
-  } else if (domain && splitList_(s.STUDENT_DOMAINS).indexOf(domain) !== -1) {
+  if (domain && splitList_(s.STUDENT_DOMAINS).indexOf(domain) !== -1) {
     customerType = CONFIG.CUSTOMER_TYPES.STUDENT;
+  } else if (domain && splitList_(s.ALLOWED_DOMAINS).indexOf(domain) !== -1) {
+    // Students and teachers share a domain: student accounts are recognised
+    // by the pattern of the part before the @ (e.g. 1111111@district.org).
+    customerType = isStudentLocalPart_(localPart, s.STUDENT_EMAIL_PATTERN)
+      ? CONFIG.CUSTOMER_TYPES.STUDENT
+      : CONFIG.CUSTOMER_TYPES.STAFF;
   }
 
   // Shop access requires BOTH: a staff-domain account AND a Staff sheet row.
@@ -46,6 +54,23 @@ function getUserContext_() {
     staffRole: staffRec ? staffRec.role : ''
   };
   return ctxMemo_;
+}
+
+/**
+ * True if the part of the email before the @ matches the student pattern.
+ * A broken pattern falls back to the default (starts with 3-9 digits) so a
+ * typo in Settings can never turn student accounts into staff accounts.
+ */
+function isStudentLocalPart_(localPart, pattern) {
+  if (!localPart || !pattern) return false;
+  var re;
+  try {
+    re = new RegExp(pattern, 'i');
+  } catch (e) {
+    logError_('isStudentLocalPart_', new Error('Invalid STUDENT_EMAIL_PATTERN "' + pattern + '"; using the default.'));
+    re = /^[0-9]{3,9}/;
+  }
+  return re.test(localPart);
 }
 
 /** Throws unless the current user may place/modify their own orders. */

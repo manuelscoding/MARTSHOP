@@ -407,6 +407,53 @@ test('history: search by number, name, email, date; newest first; status timelin
   same(h1, ['Pending', 'Awaiting Customer Response', 'Pending', 'Completed']);
 });
 
+test('shared domain: numeric accounts are students, name accounts are staff', () => {
+  const NUM_STUDENT = '1111111@school.org';
+  // Default settings: student ordering OFF, so numeric accounts are denied.
+  as(NUM_STUDENT);
+  fail(g.getCustomerBootstrap(), /does not have access/);
+  fail(g.submitOrder(order()), /does not have access/);
+  // Listing a student in the Staff sheet never grants the dashboard.
+  sheets.Staff.appendRow([NUM_STUDENT, 'Helper', 'Staff']);
+  cacheMap.delete('staff_v1');
+  as(NUM_STUDENT);
+  fail(g.getActiveOrders(''), /only for coffee shop staff/);
+  assert.strictEqual(g.doGet({ parameter: { page: 'shop' } }).file, 'Message');
+  // Teacher formats are staff.
+  ['firstname.lastname@school.org', 'f.lastname@school.org', 'F.Lastname@school.org', 'flastname@school.org', 'jsmith2@school.org'].forEach(e => {
+    as(e);
+    assert.ok(ok(g.getCustomerBootstrap()).menu.length > 0, e);
+    assert.strictEqual(vm.runInContext('getUserContext_().customerType', g), 'Staff', e);
+  });
+  ['123@school.org', '123456789@school.org', '1111111@school.org'].forEach(e => {
+    as(e);
+    assert.strictEqual(vm.runInContext('getUserContext_().customerType', g), 'Student', e);
+  });
+  as('12@school.org');   // fewer than 3 digits: not the student format
+  assert.strictEqual(vm.runInContext('getUserContext_().customerType', g), 'Staff');
+  // Enable students: numeric account orders as a Student with student rules.
+  as(ownerEmail);
+  setSetting('STUDENT_ORDERING_ENABLED', 'TRUE');
+  as(NUM_STUDENT);
+  const boot = ok(g.getCustomerBootstrap());
+  assert.strictEqual(boot.rules.deliveryEnabled, false);
+  assert.strictEqual(boot.user.isShopStaff, false);
+  const s1 = ok(g.submitOrder(order({ name: 'Student', delivery: false, items: [{ id: 'LATTE', qty: 1 }] })));
+  assert.strictEqual(orderRow(s1.orderNumber).CustomerType, 'Student');
+  fail(g.getActiveOrders(''), /only for coffee shop staff/);
+  // A broken pattern falls back to the safe default instead of making students staff.
+  as(ownerEmail);
+  setSetting('STUDENT_EMAIL_PATTERN', '([0-9');
+  as(NUM_STUDENT);
+  assert.strictEqual(vm.runInContext('getUserContext_().customerType', g), 'Student');
+  as(ownerEmail);
+  setSetting('STUDENT_EMAIL_PATTERN', '^[0-9]{3,9}');
+  setSetting('STUDENT_ORDERING_ENABLED', 'FALSE');
+  // cancel the student's order so later tests are unaffected
+  as(STAFF);
+  ok(g.cancelOrder(s1.orderNumber, 'test cleanup'));
+});
+
 test('students: blocked until enabled, never staff, student rules apply', () => {
   as(STUDENT);
   fail(g.getCustomerBootstrap(), /does not have access/);
@@ -467,8 +514,9 @@ test('archiving moves old closed orders; numbers keep increasing', () => {
   assert.ok(!o.data.some((x, i) => i > 0 && x[0] === 1));
   as(OTHER_TEACHER);
   setSetting('MAX_ACTIVE_ORDERS_PER_CUSTOMER', 0);
+  const lastIssued = Number(props.get('LAST_ORDER_NUMBER'));
   const n = ok(g.submitOrder(order({ name: 'Bob', delivery: false }))).orderNumber;
-  assert.strictEqual(n, 10);   // 9 orders so far; archived #1 is never reused
+  assert.strictEqual(n, lastIssued + 1);   // keeps counting up; archived #1 is never reused
 });
 
 test('Orders sheet grows past its row limit without errors', () => {
@@ -477,5 +525,5 @@ test('Orders sheet grows past its row limit without errors', () => {
   ok(g.submitOrder(order({ name: 'Bob', delivery: false })));
 });
 
-same(g.__errors.filter(e => !/quota/i.test(e)), [], 'unexpected server errors');
+same(g.__errors.filter(e => !/quota|STUDENT_EMAIL_PATTERN/i.test(e)), [], 'unexpected server errors');
 console.info('\nAll ' + passed + ' simulated test groups passed.');

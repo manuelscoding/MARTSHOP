@@ -59,7 +59,8 @@ Allow about 20 minutes. You need a Google Workspace account on your school domai
 
 1. **Settings** tab. Check these values at least:
    - `SHOP_NAME`
-   - `ALLOWED_DOMAINS`: should be your domain, e.g. `yourschool.org`
+   - `ALLOWED_DOMAINS`: should be your domain, e.g. `district.org`
+   - `STUDENT_EMAIL_PATTERN`: leave as `^[0-9]{3,9}`, so numeric accounts like `1111111@district.org` are treated as students. They are refused until `STUDENT_ORDERING_ENABLED` is `TRUE`.
    - `ORDER_DAYS`, `ORDER_OPEN_TIME`, `ORDER_CLOSE_TIME`: blank means no limit
    - `REPLY_TO_EMAIL` (optional)
    - While testing, set `SEND_EMAILS` to `FALSE` if you don't want real emails to go out.

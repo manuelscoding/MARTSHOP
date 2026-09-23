@@ -146,8 +146,9 @@ Tip: set `ORDER_OPEN_TIME` and `ORDER_CLOSE_TIME` to blank while testing, so the
 
 | # | Steps | Expected |
 |---|---|---|
-| 12.1 🤖 | Student account, before enabling | Access denied. |
-| 12.2 🤖 | Enable `STUDENT_DOMAINS` and `STUDENT_ORDERING_ENABLED` | The student can order. Pickup only (default). At most `STUDENT_MAX_ITEMS_PER_ORDER` items and 1 active order. |
+| 12.1 🤖 | A numeric student account (e.g. `1111111@district.org`), before enabling | Access denied (not treated as staff). |
+| 12.1b 🤖 | Teacher accounts in each format: `firstname.lastname@`, `f.lastname@`, `flastname@` | Can order. Orders are marked `Staff`. |
+| 12.2 🤖 | Set `STUDENT_ORDERING_ENABLED` = `TRUE` | The student can order. Pickup only (default). At most `STUDENT_MAX_ITEMS_PER_ORDER` items and 1 active order. The order's `CustomerType` is `Student`. |
 | 12.3 🤖 | Add the student's email to the Staff tab, then open `?page=shop` | **Still denied.** Students can never be shop staff. |
 | 12.4 | Dashboard | Student orders show a purple **STUDENT** badge. |
 | 12.5 | `STUDENT_DELIVERY_ENABLED` = `TRUE`, `STUDENT_ALLOWED_ROOMS` = `LIBRARY` | Only LIBRARY is accepted for student delivery. |
