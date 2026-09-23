@@ -1,0 +1,476 @@
+<script>
+/**
+ * ShopJs.html — the staff dashboard.
+ *
+ *  - Polls getActiveOrders() every POLL_SECONDS without reloading the page.
+ *    The server answers "unchanged" cheaply when nothing happened.
+ *  - "Submitted N min ago" timers update every 5 seconds on the device.
+ *  - New orders (and orders the customer just revised) are highlighted.
+ *
+ * Every button calls a server function that re-checks staff access, so
+ * nothing here is trusted for security.
+ */
+(function () {
+  'use strict';
+  var h = App.h;
+  var ST = { PENDING: 'Pending', AWAITING: 'Awaiting Customer Response', IN_PROGRESS: 'In Progress', COMPLETED: 'Completed', CANCELLED: 'Cancelled' };
+  var HIGHLIGHT_MS = 3 * 60 * 1000;
+  var LATE_MINUTES = 15;
+
+  var S = {
+    boot: null,
+    version: '',
+    orders: [],
+    serverOffset: 0,
+    known: null,          // orderNumber -> {u: statusUpdatedAt, s: status}
+    highlight: {},        // orderNumber -> {type:'new'|'updated', until: ms}
+    polling: false,
+    pendingForce: false,
+    pollTimer: null,
+    failures: 0,
+    lastSuccess: 0,
+    busy: {},
+    sound: false,
+    audio: null,
+    tab: 'active',
+    historyLoaded: false
+  };
+
+  var ordersEl = document.getElementById('orders');
+  var connEl = document.getElementById('conn');
+
+  function serverNow() { return Date.now() + S.serverOffset; }
+
+  /* ---------------- startup & polling ---------------- */
+
+  function init() {
+    App.call('getShopBootstrap').then(function (b) {
+      S.boot = b;
+      App.setCurrency(b.currency);
+      document.getElementById('userEmail').textContent = b.user.email;
+      poll(true);
+      setInterval(tick, 5000);
+    }).catch(function (err) {
+      App.clear(ordersEl).appendChild(App.errorPanel(err.message, init));
+      setConn(false, 'Not connected');
+    });
+  }
+
+  function poll(force) {
+    if (S.polling) { if (force) S.pendingForce = true; return; }
+    S.polling = true;
+    clearTimeout(S.pollTimer);
+    App.call('getActiveOrders', force ? '' : S.version).then(function (res) {
+      S.failures = 0;
+      S.lastSuccess = Date.now();
+      S.serverOffset = res.serverNow - Date.now();
+      if (!res.unchanged) {
+        S.version = res.version;
+        receive(res.orders);
+      }
+      setConn(true);
+    }).catch(function (err) {
+      S.failures++;
+      setConn(false, err.message);
+      if (S.known === null) App.clear(ordersEl).appendChild(App.errorPanel(err.message, function () { poll(true); }));
+    }).then(function () {
+      S.polling = false;
+      if (S.pendingForce) { S.pendingForce = false; poll(true); } else schedule();
+    });
+  }
+
+  function schedule() {
+    clearTimeout(S.pollTimer);
+    var base = (S.boot ? S.boot.pollSeconds : 12) * 1000;
+    if (document.hidden) base = Math.max(base, 30000);
+    var delay = S.failures ? Math.min(60000, base * Math.pow(2, Math.min(S.failures, 3))) : base;
+    S.pollTimer = setTimeout(function () { poll(false); }, delay);
+  }
+
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) poll(false); });
+
+  function setConn(ok, msg) {
+    connEl.classList.toggle('bad', !ok);
+    connEl.textContent = ok ? 'Live · updated just now' : 'Connection problem — retrying';
+    connEl.title = ok ? '' : (msg || '');
+  }
+
+  /** Compares new data with what we had, to highlight new/revised orders. */
+  function receive(orders) {
+    var first = S.known === null;
+    var known = {};
+    var newCount = 0;
+    orders.forEach(function (o) {
+      var prev = first ? null : S.known[o.orderNumber];
+      if (!first && !prev) {
+        S.highlight[o.orderNumber] = { type: 'new', until: Date.now() + HIGHLIGHT_MS };
+        newCount++;
+      } else if (prev && prev.u !== o.statusUpdatedAt && prev.s === ST.AWAITING && o.status === ST.PENDING) {
+        S.highlight[o.orderNumber] = { type: 'updated', until: Date.now() + HIGHLIGHT_MS };
+        newCount++;
+      }
+      known[o.orderNumber] = { u: o.statusUpdatedAt, s: o.status };
+    });
+    S.known = known;
+    S.orders = orders;
+    if (newCount) {
+      beep();
+      App.toast(newCount === 1 ? 'New order!' : newCount + ' new or updated orders', 'ok');
+    }
+    renderOrders();
+  }
+
+  /* ---------------- rendering active orders ---------------- */
+
+  function renderOrders() {
+    document.getElementById('activeCount').textContent = String(S.orders.length);
+    document.title = (S.orders.length ? '(' + S.orders.length + ') ' : '') + (S.boot ? S.boot.shopName + ' — Orders' : 'Orders');
+
+    var focusKey = document.activeElement && document.activeElement.getAttribute('data-key');
+    App.clear(ordersEl);
+    if (!S.orders.length) {
+      ordersEl.appendChild(h('div', { class: 'empty', style: 'grid-column:1/-1' }, 'No active orders. New orders will appear here automatically.'));
+      return;
+    }
+    S.orders.forEach(function (o) { ordersEl.appendChild(card(o)); });
+    if (focusKey) {
+      var el = ordersEl.querySelector('[data-key="' + focusKey + '"]');
+      if (el && !el.disabled) el.focus();
+    }
+    tick();
+  }
+
+  function card(o) {
+    var hl = S.highlight[o.orderNumber];
+    if (hl && hl.until < Date.now()) { delete S.highlight[o.orderNumber]; hl = null; }
+    var awaiting = o.status === ST.AWAITING;
+    var busy = !!S.busy[o.orderNumber];
+
+    var cls = 'order-card' + (hl ? ' is-' + hl.type : '') + (awaiting ? ' awaiting' : '');
+    var el = h('article', { class: cls, 'aria-label': 'Order ' + o.orderNumber, 'aria-busy': busy ? 'true' : null,
+      onclick: function () {
+        if (S.highlight[o.orderNumber]) { delete S.highlight[o.orderNumber]; el.classList.remove('is-new', 'is-updated'); var b = el.querySelector('.hl-badge'); if (b) b.remove(); }
+      } },
+      h('div', { class: 'order-head' },
+        h('span', { class: 'order-num' }, '#' + o.orderNumber),
+        h('span', { class: App.statusClass(o.status) }, o.status),
+        hl ? h('span', { class: 'badge hl-badge ' + hl.type }, hl.type === 'new' ? 'NEW' : 'UPDATED') : null,
+        o.customerType === 'Student' ? h('span', { class: 'badge student' }, 'STUDENT') : null,
+        h('span', { class: 'spacer' }),
+        h('span', { class: 'elapsed', 'data-since': String(o.timestamp), title: 'Submitted ' + App.dateTime(o.timestamp) })),
+      o.delivery
+        ? h('div', { class: 'fulfil delivery' }, 'DELIVERY', h('span', { class: 'room' }, 'ROOM ' + o.room))
+        : h('div', { class: 'fulfil pickup' }, 'PICKUP'),
+      h('div', { class: 'customer' }, h('strong', null, o.customerName), h('div', { class: 'small muted' }, o.customerEmail)),
+      h('ul', { class: 'order-items' }, o.items.map(function (l) {
+        return h('li', { class: l.unavailable ? 'unavail' : '' },
+          h('span', { class: 'qty' }, l.qty + '×'),
+          h('span', { class: 'label' }, l.name),
+          l.unavailable ? h('span', { class: 'tag-unavail' }, 'UNAVAILABLE') : null,
+          h('span', { class: 'price' }, App.money(l.lineTotal)));
+      })),
+      h('div', { class: 'order-meta' },
+        h('span', { class: 'total' }, App.money(o.total)),
+        h('span', { class: 'pay ' + o.payment }, o.payment.toUpperCase())),
+      awaiting ? h('div', { class: 'waiting', 'data-waiting': String(o.statusUpdatedAt) }) : null,
+      awaiting ? h('div', { class: 'small muted' }, 'If they continue without it, new total: ' + App.money(o.totalIfContinued)) : null,
+      o.staffNotes ? h('div', { class: 'notes' }, o.staffNotes) : null,
+      actions(o, busy));
+    return el;
+  }
+
+  function actions(o, busy) {
+    var n = o.orderNumber;
+    function btn(label, cls, key, handler) {
+      return h('button', { type: 'button', class: 'btn small ' + cls, 'data-key': n + '-' + key, disabled: busy, onclick: handler }, label);
+    }
+    var list = [];
+    if (o.status === ST.PENDING) list.push(btn('Start', '', 'start', function () { run(n, 'startOrder', [n], 'Order #' + n + ' started'); }));
+    if (o.status === ST.PENDING || o.status === ST.IN_PROGRESS) {
+      list.push(btn('Complete', 'ok', 'complete', function () { run(n, 'completeOrder', [n], 'Order #' + n + ' completed'); }));
+      list.push(btn('Item unavailable', 'warn', 'unavail', function () { unavailableDialog(o); }));
+    }
+    if (o.status === ST.AWAITING) {
+      list.push(btn('Continue without item', 'ok', 'continue', function () { continueDialog(o); }));
+      list.push(btn('Mark more unavailable', 'warn', 'unavail', function () { unavailableDialog(o); }));
+    }
+    list.push(btn('Cancel', 'danger', 'cancel', function () { cancelDialog(o); }));
+    return h('div', { class: 'order-actions' }, list);
+  }
+
+  /** Updates timers without re-rendering. */
+  function tick() {
+    var now = serverNow();
+    var warnMs = (S.boot ? S.boot.awaitingWarnMinutes : 15) * 60000;
+    Array.prototype.forEach.call(document.querySelectorAll('[data-since]'), function (el) {
+      var since = Number(el.getAttribute('data-since'));
+      var ago = App.timeAgo(since, now);
+      el.textContent = 'Submitted ' + (ago === 'just now' ? 'just now' : ago + ' ago');
+      el.classList.toggle('old', now - since > LATE_MINUTES * 60000);
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-waiting]'), function (el) {
+      var since = Number(el.getAttribute('data-waiting'));
+      var overdue = now - since > warnMs;
+      el.textContent = 'Waiting on customer: ' + App.timeAgo(since, now) + (overdue ? ' — consider calling them or cancelling' : '');
+      el.classList.toggle('overdue', overdue);
+      var cardEl = el.closest('.order-card');
+      if (cardEl) cardEl.classList.toggle('overdue', overdue);
+    });
+    if (S.lastSuccess && !connEl.classList.contains('bad')) {
+      var secs = Math.round((Date.now() - S.lastSuccess) / 1000);
+      connEl.textContent = 'Live · updated ' + (secs < 5 ? 'just now' : secs + 's ago');
+    }
+  }
+
+  /* ---------------- actions ---------------- */
+
+  function run(orderNumber, fnName, args, successMsg) {
+    S.busy[orderNumber] = true;
+    renderOrders();
+    return App.call.apply(null, [fnName].concat(args)).then(function (res) {
+      App.toast(successMsg, 'ok');
+      if (res && res.warning) {
+        App.modal({ title: 'Email not sent', body: res.warning, buttons: [{ label: 'OK', class: 'btn primary', value: true }] });
+      }
+    }).catch(function (err) {
+      App.toast(err.message, 'error');
+    }).then(function () {
+      delete S.busy[orderNumber];
+      poll(true);
+    });
+  }
+
+  function unavailableDialog(o) {
+    var candidates = o.items.filter(function (l) { return !l.unavailable; });
+    if (!candidates.length) { App.toast('All items are already marked unavailable.', 'error'); return; }
+    var boxes = candidates.map(function (l) {
+      return { id: l.id, input: h('input', { type: 'checkbox', value: l.id }), line: l };
+    });
+    var menuBox = h('input', { type: 'checkbox', id: 'alsoMenu' });
+    var err = h('div', { class: 'field-error', role: 'alert' });
+    var allWarn = h('div', { class: 'alert warn', hidden: true }, 'All items are selected. The customer will be asked to revise their order, or it will be cancelled.');
+    function updateWarn() {
+      var picked = boxes.filter(function (b) { return b.input.checked; }).length;
+      allWarn.hidden = picked !== boxes.length;
+      if (picked) err.textContent = '';
+    }
+    boxes.forEach(function (b) { b.input.addEventListener('change', updateWarn); });
+
+    var body = h('div', null,
+      h('p', null, 'Order #' + o.orderNumber + ' for ' + o.customerName + '. The order will be put on hold and the customer will be emailed links to revise it or continue without the item.'),
+      h('fieldset', null,
+        h('legend', { class: 'small' }, 'Which items are unavailable?'),
+        boxes.map(function (b) { return h('label', { class: 'check' }, b.input, b.line.qty + ' × ' + b.line.name); })),
+      allWarn,
+      h('label', { class: 'check', for: 'alsoMenu' }, menuBox, 'Also turn these items off on the menu'),
+      err);
+
+    App.modal({
+      title: 'Mark item unavailable',
+      body: body,
+      buttons: [
+        { label: 'Go back', class: 'btn', value: null },
+        { label: 'Email customer', class: 'btn primary', value: 'send', validate: function () {
+          var ok = boxes.some(function (b) { return b.input.checked; });
+          if (!ok) err.textContent = 'Select at least one item.';
+          return ok;
+        } }
+      ]
+    }).then(function (v) {
+      if (v !== 'send') return;
+      var ids = boxes.filter(function (b) { return b.input.checked; }).map(function (b) { return b.id; });
+      run(o.orderNumber, 'markItemsUnavailable', [o.orderNumber, ids, menuBox.checked], 'Customer emailed about order #' + o.orderNumber);
+    });
+  }
+
+  function cancelDialog(o) {
+    var reason = h('input', { type: 'text', id: 'cancelReason', maxlength: '200', placeholder: 'e.g. Out of milk, shop closing early' });
+    var body = h('div', null,
+      h('p', null, 'Cancel order #' + o.orderNumber + ' for ' + o.customerName + '? The customer will be emailed. This cannot be undone.'),
+      h('label', { for: 'cancelReason' }, 'Reason (optional, included in the email)'),
+      reason);
+    App.modal({
+      title: 'Cancel order #' + o.orderNumber + '?',
+      body: body,
+      buttons: [
+        { label: 'Keep order', class: 'btn', value: null },
+        { label: 'Cancel order', class: 'btn danger solid', value: 'cancel' }
+      ]
+    }).then(function (v) {
+      if (v !== 'cancel') return;
+      run(o.orderNumber, 'cancelOrder', [o.orderNumber, reason.value], 'Order #' + o.orderNumber + ' cancelled');
+    });
+  }
+
+  function continueDialog(o) {
+    var gone = o.items.filter(function (l) { return l.unavailable; }).map(function (l) { return l.name; }).join(', ');
+    var remaining = o.items.filter(function (l) { return !l.unavailable; }).length;
+    var msg = remaining
+      ? 'Use this if the customer told you (in person or by phone) to continue without ' + gone + '. New total: ' + App.money(o.totalIfContinued) + '. Their email links will stop working.'
+      : 'No items would remain, so the order will be CANCELLED.';
+    App.confirm('Continue order #' + o.orderNumber + ' without the item?', msg, remaining ? 'Continue order' : 'Cancel order', !remaining)
+      .then(function (ok) {
+        if (ok) run(o.orderNumber, 'staffContinueWithout', [o.orderNumber], 'Order #' + o.orderNumber + ' updated');
+      });
+  }
+
+  /* ---------------- sound ---------------- */
+
+  document.getElementById('soundBtn').addEventListener('click', function (e) {
+    S.sound = !S.sound;
+    e.currentTarget.textContent = 'Sound: ' + (S.sound ? 'on' : 'off');
+    e.currentTarget.setAttribute('aria-pressed', String(S.sound));
+    if (S.sound) {
+      try { S.audio = S.audio || new (window.AudioContext || window.webkitAudioContext)(); S.audio.resume(); beep(); } catch (err) { S.sound = false; }
+    }
+  });
+
+  function beep() {
+    if (!S.sound || !S.audio) return;
+    try {
+      var osc = S.audio.createOscillator();
+      var gain = S.audio.createGain();
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.15, S.audio.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, S.audio.currentTime + 0.5);
+      osc.connect(gain).connect(S.audio.destination);
+      osc.start();
+      osc.stop(S.audio.currentTime + 0.5);
+    } catch (e) { /* ignore */ }
+  }
+
+  /* ---------------- tabs ---------------- */
+
+  var tabs = ['active', 'history', 'menu'];
+  tabs.forEach(function (name, i) {
+    var tab = document.getElementById('tab-' + name);
+    tab.addEventListener('click', function () { showTab(name); });
+    tab.addEventListener('keydown', function (e) {
+      if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+      var next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+      showTab(next);
+      document.getElementById('tab-' + next).focus();
+    });
+  });
+
+  function showTab(name) {
+    S.tab = name;
+    tabs.forEach(function (t) {
+      var on = t === name;
+      var tab = document.getElementById('tab-' + t);
+      tab.setAttribute('aria-selected', String(on));
+      tab.tabIndex = on ? 0 : -1;
+      document.getElementById('panel-' + t).hidden = !on;
+    });
+    if (name === 'history' && !S.historyLoaded) loadHistory();
+    if (name === 'menu') loadMenu();
+    if (name === 'active') poll(true);
+  }
+
+  /* ---------------- history ---------------- */
+
+  var historyEl = document.getElementById('history');
+  document.getElementById('historyForm').addEventListener('submit', function (e) { e.preventDefault(); loadHistory(); });
+  document.getElementById('hClear').addEventListener('click', function () {
+    document.getElementById('hText').value = '';
+    document.getElementById('hDate').value = '';
+    document.getElementById('hAll').checked = false;
+    loadHistory();
+  });
+
+  function loadHistory() {
+    S.historyLoaded = true;
+    App.clear(historyEl).appendChild(App.loading('Searching…'));
+    var q = {
+      text: document.getElementById('hText').value,
+      date: document.getElementById('hDate').value,
+      status: document.getElementById('hAll').checked ? 'all' : 'closed'
+    };
+    App.call('getHistory', q).then(function (res) {
+      App.clear(historyEl);
+      historyEl.appendChild(h('p', { class: 'muted' },
+        res.totalMatches + ' order' + (res.totalMatches === 1 ? '' : 's') + ' found' +
+        (res.limited ? ' — showing the newest ' + res.orders.length + '. Narrow your search to see more.' : '') + '.'));
+      if (!res.orders.length) return;
+      res.orders.forEach(function (o) { historyEl.appendChild(historyRow(o)); });
+    }).catch(function (err) {
+      App.clear(historyEl).appendChild(App.errorPanel(err.message, loadHistory));
+    });
+  }
+
+  function historyRow(o) {
+    return h('details', { class: 'hist' },
+      h('summary', null,
+        h('strong', null, '#' + o.orderNumber),
+        h('span', null, o.customerName),
+        h('span', { class: App.statusClass(o.status) }, o.status),
+        h('span', { class: 'muted small' }, App.dateTime(o.timestamp)),
+        h('span', { class: 'spacer' }),
+        h('strong', null, App.money(o.total))),
+      h('div', { class: 'body' },
+        h('p', { class: 'small' }, o.customerEmail + (o.customerType === 'Student' ? ' (student)' : '')),
+        h('p', null, h('strong', null, o.delivery ? 'Delivery — Room ' + o.room : 'Pickup'), ' · ' + o.payment),
+        h('ul', { class: 'order-items' }, o.items.map(function (l) {
+          return h('li', { class: l.unavailable ? 'unavail' : '' }, h('span', { class: 'qty' }, l.qty + '×'), h('span', { class: 'label' }, l.name),
+            l.unavailable ? h('span', { class: 'tag-unavail' }, 'UNAVAILABLE') : null,
+            h('span', { class: 'price' }, App.money(l.lineTotal)));
+        })),
+        o.staffNotes ? h('div', { class: 'notes' }, 'Notes: ' + o.staffNotes) : null,
+        h('h3', { class: 'small', style: 'margin-top:10px' }, 'Status changes'),
+        h('ol', { class: 'timeline' }, o.history.map(function (e) {
+          return h('li', null, h('strong', null, e.s), ' — ' + App.dateTime(e.at) + (e.by ? ' by ' + e.by : '') + (e.note ? ' (' + e.note + ')' : ''));
+        })),
+        o.status === ST.COMPLETED
+          ? h('button', { type: 'button', class: 'btn small', onclick: function () {
+              App.confirm('Reopen order #' + o.orderNumber + '?', 'It will go back to the Active list as Pending.', 'Reopen').then(function (ok) {
+                if (!ok) return;
+                App.call('reopenOrder', o.orderNumber).then(function () {
+                  App.toast('Order #' + o.orderNumber + ' reopened', 'ok');
+                  loadHistory();
+                  poll(true);
+                }).catch(function (err) { App.toast(err.message, 'error'); });
+              });
+            } }, 'Reopen order')
+          : null));
+  }
+
+  /* ---------------- menu availability ---------------- */
+
+  var menuEl = document.getElementById('menuAdmin');
+
+  function loadMenu() {
+    App.clear(menuEl).appendChild(App.loading('Loading menu…'));
+    App.call('getMenuAdmin').then(function (items) {
+      App.clear(menuEl);
+      if (!items.length) { menuEl.appendChild(h('div', { class: 'empty' }, 'The Menu sheet has no items.')); return; }
+      var lastCat = null;
+      items.forEach(function (it) {
+        if (it.category !== lastCat) { menuEl.appendChild(h('h3', { class: 'category', text: it.category })); lastCat = it.category; }
+        var id = 'sw-' + String(it.id).replace(/[^A-Za-z0-9_-]/g, '_');
+        var input = h('input', { type: 'checkbox', role: 'switch', id: id, checked: it.available, 'aria-label': it.name + ' available' });
+        var row = h('div', { class: 'menu-admin-item' + (it.available ? '' : ' off') },
+          h('label', { class: 'switch', for: id }, input, h('span', { class: 'track', 'aria-hidden': 'true' })),
+          h('div', { style: 'flex:1' }, h('strong', null, it.name), h('div', { class: 'small muted' }, App.money(it.price))),
+          h('span', { class: 'small', 'data-state': '' }, it.available ? 'Available' : 'Off'));
+        input.addEventListener('change', function () {
+          var want = input.checked;
+          input.disabled = true;
+          App.call('setMenuItemAvailability', it.id, want).then(function () {
+            row.classList.toggle('off', !want);
+            row.querySelector('[data-state]').textContent = want ? 'Available' : 'Off';
+            App.toast(it.name + (want ? ' is available' : ' turned off'), 'ok');
+          }).catch(function (err) {
+            input.checked = !want;
+            App.toast(err.message, 'error');
+          }).then(function () { input.disabled = false; });
+        });
+        menuEl.appendChild(row);
+      });
+    }).catch(function (err) {
+      App.clear(menuEl).appendChild(App.errorPanel(err.message, loadMenu));
+    });
+  }
+
+  init();
+})();
+</script>

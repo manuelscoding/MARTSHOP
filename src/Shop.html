@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <?!= include('Styles'); ?>
+</head>
+<body>
+  <header class="topbar">
+    <h1><?= title ?></h1>
+    <span id="conn" class="conn" role="status" aria-live="polite">Connecting…</span>
+    <button type="button" id="soundBtn" class="btn small" aria-pressed="false" style="border-color:#fff;color:#fff;background:transparent">Sound: off</button>
+    <span id="userEmail" class="user"></span>
+  </header>
+
+  <nav class="tabs" role="tablist" aria-label="Dashboard sections">
+    <button type="button" role="tab" id="tab-active" aria-controls="panel-active" aria-selected="true">Active orders<span class="count" id="activeCount">0</span></button>
+    <button type="button" role="tab" id="tab-history" aria-controls="panel-history" aria-selected="false" tabindex="-1">History</button>
+    <button type="button" role="tab" id="tab-menu" aria-controls="panel-menu" aria-selected="false" tabindex="-1">Menu</button>
+  </nav>
+
+  <main class="page wide">
+    <section id="panel-active" role="tabpanel" aria-labelledby="tab-active">
+      <div id="activeAlert"></div>
+      <div id="orders" class="orders-grid" aria-live="polite">
+        <div class="loading" role="status"><div class="spinner" aria-hidden="true"></div><span>Loading orders…</span></div>
+      </div>
+    </section>
+
+    <section id="panel-history" role="tabpanel" aria-labelledby="tab-history" hidden>
+      <form id="historyForm" class="panel history-form" role="search">
+        <div>
+          <label for="hText">Search</label>
+          <input type="search" id="hText" placeholder="Order #, customer name, or email" maxlength="100">
+        </div>
+        <div>
+          <label for="hDate">Date</label>
+          <input type="date" id="hDate">
+        </div>
+        <button type="submit" class="btn primary">Search</button>
+        <button type="button" class="btn" id="hClear">Clear</button>
+        <label class="check small" style="grid-column:1/-1;margin:0">
+          <input type="checkbox" id="hAll"> Include active orders
+        </label>
+      </form>
+      <div id="history" aria-live="polite"></div>
+    </section>
+
+    <section id="panel-menu" role="tabpanel" aria-labelledby="tab-menu" hidden>
+      <div class="alert info">Turn items on or off for customers. To add items or change prices, edit the <strong>Menu</strong> sheet.</div>
+      <div id="menuAdmin"></div>
+    </section>
+  </main>
+
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+
+  <noscript><p class="panel">This dashboard needs JavaScript. Please enable it and reload.</p></noscript>
+  <script>window.BOOT = <?!= bootJson ?>;</script>
+  <?!= include('Scripts'); ?>
+  <?!= include('ShopJs'); ?>
+</body>
+</html>

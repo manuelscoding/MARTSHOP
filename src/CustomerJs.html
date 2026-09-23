@@ -1,0 +1,520 @@
+<script>
+/**
+ * CustomerJs.html — the customer ordering app.
+ *
+ * Flow: menu -> delivery -> payment -> review -> done
+ * Modes (from window.BOOT.mode):
+ *   'order'   normal ordering
+ *   'respond' opened from the "item unavailable" email ("Continue without")
+ *   'revise'  opened from the "Revise my order" email link
+ *
+ * Prices/totals shown here are for display only. The server recalculates
+ * everything from the Menu sheet.
+ */
+(function () {
+  'use strict';
+  var h = App.h;
+  var BOOT = window.BOOT || {};
+  var app = document.getElementById('app');
+  var cartbar = document.getElementById('cartbar');
+
+  var S = {
+    mode: BOOT.mode || 'order',
+    data: null,            // getCustomerBootstrap() result
+    menuById: {},
+    blocked: {},           // item ids that may not be re-added during a revision
+    cart: {},              // id -> qty
+    step: 'menu',
+    delivery: null,
+    room: '',
+    payment: '',
+    name: '',
+    requestId: App.uuid(),
+    submitting: false,
+    respond: null,         // getResponseContext() result
+    notice: ''
+  };
+
+  var STEPS = [['menu', 'Items'], ['delivery', 'Delivery'], ['payment', 'Payment'], ['review', 'Review']];
+
+  /* ---------------- startup ---------------- */
+
+  function init() {
+    App.clear(app).appendChild(App.loading('Loading the menu…'));
+    cartbar.hidden = true;
+    var calls = [App.call('getCustomerBootstrap')];
+    if (S.mode === 'respond' || S.mode === 'revise') calls.push(App.call('getResponseContext', BOOT.order, BOOT.token));
+
+    Promise.all(calls).then(function (res) {
+      setData(res[0]);
+      if (res[1]) S.respond = res[1];
+      if (S.mode === 'respond') return renderRespond();
+      if (S.mode === 'revise') { startRevision(); return; }
+      if (!S.data.orderingOpen) return renderClosed();
+      go('menu');
+    }).catch(function (err) {
+      App.clear(app).appendChild(App.errorPanel(err.message, init));
+    });
+  }
+
+  function setData(data) {
+    S.data = data;
+    App.setCurrency(data.currency);
+    S.menuById = {};
+    data.menu.forEach(function (it) { S.menuById[it.id] = it; });
+    document.getElementById('userEmail').textContent = data.user.email;
+    var link = document.getElementById('shopLink');
+    if (data.user.isShopStaff && BOOT.baseUrl) {
+      link.href = BOOT.baseUrl + '?page=shop';
+      link.hidden = false;
+    }
+    if (!S.name) S.name = App.store.get('coffee_name') || data.user.suggestedName || '';
+  }
+
+  function go(step) {
+    S.step = step;
+    cartbar.hidden = step !== 'menu';
+    if (step === 'menu') renderMenu();
+    else if (step === 'delivery') renderDelivery();
+    else if (step === 'payment') renderPayment();
+    else if (step === 'review') renderReview();
+    window.scrollTo(0, 0);
+    var heading = app.querySelector('h2');
+    if (heading) { heading.setAttribute('tabindex', '-1'); heading.focus(); }
+  }
+
+  function stepsNav() {
+    return h('ol', { class: 'steps', 'aria-label': 'Progress' }, STEPS.map(function (s) {
+      return h('li', { 'aria-current': s[0] === S.step ? 'step' : null }, s[1]);
+    }));
+  }
+
+  function reviseBanner() {
+    if (S.mode !== 'revise' || !S.respond) return null;
+    var names = S.respond.unavailable.map(function (u) { return u.name; }).join(', ');
+    return h('div', { class: 'alert warn' },
+      h('strong', null, 'Revising order #' + S.respond.orderNumber + '. '),
+      names + (S.respond.unavailable.length > 1 ? ' are' : ' is') + ' not available and has been removed.',
+      S.notice ? h('div', { text: S.notice }) : null);
+  }
+
+  /* ---------------- cart ---------------- */
+
+  function cartLines() {
+    return S.data.menu.filter(function (it) { return S.cart[it.id] > 0; }).map(function (it) {
+      return { id: it.id, name: it.name, price: it.price, qty: S.cart[it.id] };
+    });
+  }
+  function cartQty() {
+    return Object.keys(S.cart).reduce(function (n, id) { return n + (S.cart[id] || 0); }, 0);
+  }
+  function cartTotal() {
+    return cartLines().reduce(function (c, l) { return c + App.cents(l.price) * l.qty; }, 0) / 100;
+  }
+
+  function setQty(id, q) {
+    var rules = S.data.rules;
+    q = Math.floor(Number(q));
+    if (!isFinite(q) || q < 0) q = 0;
+    if (q > rules.maxQtyPerItem) { q = rules.maxQtyPerItem; App.toast('Maximum ' + rules.maxQtyPerItem + ' of one item.', 'error'); }
+    var others = cartQty() - (S.cart[id] || 0);
+    if (others + q > rules.maxItemsPerOrder) {
+      q = Math.max(0, rules.maxItemsPerOrder - others);
+      App.toast('Orders are limited to ' + rules.maxItemsPerOrder + ' items.', 'error');
+    }
+    if (q) S.cart[id] = q; else delete S.cart[id];
+    updateItemRow(id);
+    updateCartBar();
+  }
+
+  function updateItemRow(id) {
+    var row = document.getElementById('item-' + cssId(id));
+    if (!row) return;
+    var q = S.cart[id] || 0;
+    row.classList.toggle('in-cart', q > 0);
+    row.querySelector('input').value = q;
+    row.querySelector('.minus').disabled = q <= 0;
+    row.querySelector('.plus').disabled = q >= S.data.rules.maxQtyPerItem;
+  }
+
+  function updateCartBar() {
+    var n = cartQty();
+    document.getElementById('cartCount').textContent = n + (n === 1 ? ' item' : ' items');
+    document.getElementById('cartTotal').textContent = App.money(cartTotal());
+    var btn = document.getElementById('cartContinue');
+    btn.disabled = n === 0;
+    btn.setAttribute('aria-disabled', n === 0 ? 'true' : 'false');
+  }
+
+  function cssId(id) { return String(id).replace(/[^A-Za-z0-9_-]/g, '_'); }
+
+  document.getElementById('cartContinue').addEventListener('click', function () {
+    if (cartQty() === 0) { App.toast('Please add at least one item.', 'error'); return; }
+    go('delivery');
+  });
+
+  /* ---------------- step 1: menu ---------------- */
+
+  function renderMenu() {
+    var items = S.data.menu.filter(function (it) { return !S.blocked[it.id]; });
+    var list = [];
+    var lastCat = null;
+    items.forEach(function (it) {
+      if (it.category !== lastCat) { list.push(h('h3', { class: 'category', text: it.category })); lastCat = it.category; }
+      var q = S.cart[it.id] || 0;
+      var input = h('input', {
+        type: 'number', inputmode: 'numeric', min: '0', max: String(S.data.rules.maxQtyPerItem), step: '1',
+        value: String(q), 'aria-label': 'Quantity of ' + it.name,
+        onchange: function (e) { setQty(it.id, e.target.value); }
+      });
+      list.push(h('div', { class: 'menu-item' + (q ? ' in-cart' : ''), id: 'item-' + cssId(it.id) },
+        h('div', { class: 'info' }, h('div', { class: 'name', text: it.name }), h('div', { class: 'muted', text: App.money(it.price) })),
+        h('div', { class: 'stepper' },
+          h('button', { type: 'button', class: 'minus', 'aria-label': 'Remove one ' + it.name, disabled: q <= 0,
+            onclick: function () { setQty(it.id, (S.cart[it.id] || 0) - 1); } }, '−'),
+          input,
+          h('button', { type: 'button', class: 'plus', 'aria-label': 'Add one ' + it.name, disabled: q >= S.data.rules.maxQtyPerItem,
+            onclick: function () { setQty(it.id, (S.cart[it.id] || 0) + 1); } }, '+'))));
+    });
+
+    App.clear(app).appendChild(h('div', null,
+      stepsNav(),
+      reviseBanner(),
+      h('h2', null, S.mode === 'revise' ? 'Update your items' : 'What would you like?'),
+      items.length ? list : h('div', { class: 'panel empty', text: 'Nothing is available right now. Please check back later.' })));
+    updateCartBar();
+  }
+
+  /* ---------------- step 2: delivery ---------------- */
+
+  function roomError(value) {
+    var r = String(value || '').toUpperCase().replace(/\s+/g, ' ').trim();
+    var rules = S.data.rules;
+    if (!r) return 'Please enter a room number for delivery.';
+    if (r.length > rules.roomMax || !/^[A-Z0-9 .\-]+$/.test(r)) return 'Please enter a valid room number (for example 214 or B12).';
+    if (rules.allowedRooms.length) return rules.allowedRooms.indexOf(r) === -1 ? 'Delivery is only available to: ' + rules.allowedRooms.join(', ') + '.' : '';
+    if (rules.namedRooms.indexOf(r) !== -1) return '';
+    var re;
+    try { re = new RegExp(rules.roomPattern); } catch (e) { re = /^[A-Z]?[0-9]{1,4}[A-Z]?$/; }
+    return re.test(r) ? '' : 'Please enter a valid room number (for example 214 or B12).';
+  }
+
+  function renderDelivery() {
+    var rules = S.data.rules;
+    var body;
+    if (!rules.deliveryEnabled) {
+      S.delivery = false;
+      S.room = '';
+      body = h('div', { class: 'panel' },
+        h('h2', null, 'Pickup'),
+        h('p', null, 'Delivery is not available right now, so please pick up your order at the coffee shop.'),
+        h('div', { class: 'row' },
+          h('button', { type: 'button', class: 'btn', onclick: function () { go('menu'); } }, 'Back'),
+          h('div', { class: 'spacer' }),
+          h('button', { type: 'button', class: 'btn primary', onclick: function () { go('payment'); } }, 'Continue')));
+      App.clear(app).appendChild(h('div', null, stepsNav(), reviseBanner(), body));
+      return;
+    }
+
+    var err = h('div', { class: 'field-error', id: 'roomErr', role: 'alert' });
+    var roomInput = h('input', {
+      type: 'text', id: 'room', autocomplete: 'off', autocapitalize: 'characters', maxlength: String(rules.roomMax),
+      value: S.room, 'aria-describedby': 'roomHint roomErr', required: true,
+      oninput: function (e) { S.room = e.target.value; e.target.removeAttribute('aria-invalid'); err.textContent = ''; }
+    });
+    var hint = rules.allowedRooms.length
+      ? 'Delivery is available to: ' + rules.allowedRooms.join(', ') + '.'
+      : 'For example 214, B12' + (rules.namedRooms.length ? ', or ' + rules.namedRooms.slice(0, 3).join(', ') : '') + '.';
+    var roomBox = h('div', { hidden: S.delivery !== true },
+      h('label', { for: 'room' }, 'Room number'), roomInput, h('div', { class: 'hint', id: 'roomHint', text: hint }), err);
+    var choiceErr = h('div', { class: 'field-error', role: 'alert' });
+
+    function choice(value, label) {
+      return h('label', { class: 'choice' },
+        h('input', { type: 'radio', name: 'delivery', value: value ? 'yes' : 'no', checked: S.delivery === value,
+          onchange: function () { S.delivery = value; roomBox.hidden = !value; choiceErr.textContent = ''; if (value) roomInput.focus(); } }),
+        h('span', null, label));
+    }
+
+    var form = h('form', { class: 'panel', novalidate: true, onsubmit: function (e) {
+      e.preventDefault();
+      if (S.delivery !== true && S.delivery !== false) { choiceErr.textContent = 'Please choose Yes or No.'; return; }
+      if (S.delivery) {
+        var msg = roomError(S.room);
+        if (msg) { err.textContent = msg; roomInput.setAttribute('aria-invalid', 'true'); roomInput.focus(); return; }
+        S.room = S.room.toUpperCase().replace(/\s+/g, ' ').trim();
+      } else {
+        S.room = '';
+      }
+      go('payment');
+    } },
+      h('fieldset', null,
+        h('legend', null, h('h2', { style: 'margin:0' }, 'Would you like delivery?')),
+        h('div', { class: 'choices' }, choice(true, 'Yes, deliver to my room'), choice(false, 'No, I\'ll pick it up')),
+        choiceErr),
+      roomBox,
+      h('div', { class: 'row', style: 'margin-top:16px' },
+        h('button', { type: 'button', class: 'btn', onclick: function () { go('menu'); } }, 'Back'),
+        h('div', { class: 'spacer' }),
+        h('button', { type: 'submit', class: 'btn primary' }, 'Continue')));
+
+    App.clear(app).appendChild(h('div', null, stepsNav(), reviseBanner(), form));
+  }
+
+  /* ---------------- step 3: payment ---------------- */
+
+  function renderPayment() {
+    var err = h('div', { class: 'field-error', role: 'alert' });
+    function choice(value, label) {
+      return h('label', { class: 'choice' },
+        h('input', { type: 'radio', name: 'payment', value: value, checked: S.payment === value,
+          onchange: function () { S.payment = value; err.textContent = ''; } }),
+        h('span', null, label));
+    }
+    var form = h('form', { class: 'panel', novalidate: true, onsubmit: function (e) {
+      e.preventDefault();
+      if (S.payment !== 'Cash' && S.payment !== 'Card') { err.textContent = 'Please choose cash or card.'; return; }
+      go('review');
+    } },
+      h('fieldset', null,
+        h('legend', null, h('h2', { style: 'margin:0' }, 'Are you paying with cash or card?')),
+        h('div', { class: 'choices' }, choice('Cash', 'Cash'), choice('Card', 'Card')),
+        err,
+        h('p', { class: 'hint' }, 'You pay when you ' + (S.delivery ? 'receive your delivery' : 'pick up your order') + '. Nothing is charged online.')),
+      h('div', { class: 'row' },
+        h('button', { type: 'button', class: 'btn', onclick: function () { go('delivery'); } }, 'Back'),
+        h('div', { class: 'spacer' }),
+        h('button', { type: 'submit', class: 'btn primary' }, 'Review order')));
+    App.clear(app).appendChild(h('div', null, stepsNav(), reviseBanner(), form));
+  }
+
+  /* ---------------- step 4: review & submit ---------------- */
+
+  function summaryTable(lines, total) {
+    return h('table', { class: 'summary-table' },
+      h('caption', { class: 'sr-only' }, 'Order items'),
+      h('tbody', null,
+        lines.map(function (l) {
+          return h('tr', null,
+            h('td', null, l.qty + ' × ' + l.name),
+            h('td', { class: 'num' }, App.money(App.cents(l.price) * l.qty / 100)));
+        }),
+        h('tr', { class: 'total' }, h('td', null, 'Total'), h('td', { class: 'num' }, App.money(total)))));
+  }
+
+  function renderReview() {
+    var lines = cartLines();
+    if (!lines.length) { go('menu'); return; }
+    var errBox = h('div', { class: 'alert error', role: 'alert', hidden: true });
+    var nameErr = h('div', { class: 'field-error', role: 'alert' });
+    var nameInput = h('input', { type: 'text', id: 'custName', autocomplete: 'name', maxlength: String(S.data.rules.nameMax),
+      value: S.name, required: true, 'aria-describedby': 'nameErr',
+      oninput: function (e) { S.name = e.target.value; nameErr.textContent = ''; e.target.removeAttribute('aria-invalid'); } });
+    nameErr.id = 'nameErr';
+    var submitBtn = h('button', { type: 'submit', class: 'btn primary block' },
+      S.mode === 'revise' ? 'Submit updated order' : 'Place order');
+
+    function editBtn(label, step) {
+      return h('button', { type: 'button', class: 'btn linklike small', onclick: function () { go(step); } }, label);
+    }
+
+    var form = h('form', { class: 'panel', novalidate: true, onsubmit: function (e) {
+      e.preventDefault();
+      if (S.submitting) return;                                   // double-submit guard
+      var name = S.name.replace(/\s+/g, ' ').trim();
+      if (!name) { nameErr.textContent = 'Please enter your name.'; nameInput.setAttribute('aria-invalid', 'true'); nameInput.focus(); return; }
+      submit(submitBtn, errBox);
+    } },
+      h('h2', null, S.mode === 'revise' ? 'Review your updated order' : 'Review your order'),
+      summaryTable(lines, cartTotal()),
+      h('div', { class: 'row' }, editBtn('Change items', 'menu')),
+      h('dl', { class: 'kv' },
+        h('dt', null, 'Delivery'), h('dd', null, S.delivery ? 'Yes — Room ' + S.room : 'No — pickup', ' ', editBtn('Change', 'delivery')),
+        h('dt', null, 'Payment'), h('dd', null, S.payment, ' ', editBtn('Change', 'payment'))),
+      h('div', { style: 'margin-bottom:16px' }, h('label', { for: 'custName' }, 'Name for the order'), nameInput, nameErr),
+      errBox,
+      submitBtn,
+      h('p', { class: 'hint center', style: 'margin-top:10px' }, 'Signed in as ' + S.data.user.email));
+
+    App.clear(app).appendChild(h('div', null, stepsNav(), reviseBanner(), form));
+  }
+
+  function submit(btn, errBox) {
+    S.submitting = true;
+    btn.disabled = true;
+    btn.setAttribute('aria-busy', 'true');
+    btn.textContent = S.mode === 'revise' ? 'Submitting…' : 'Placing order…';
+    errBox.hidden = true;
+
+    var payload = {
+      items: cartLines().map(function (l) { return { id: l.id, qty: l.qty }; }),
+      name: S.name.replace(/\s+/g, ' ').trim(),
+      delivery: S.delivery === true,
+      room: S.delivery ? S.room : '',
+      payment: S.payment,
+      requestId: S.requestId                                     // same id on retry = same order, never a duplicate
+    };
+    var p = S.mode === 'revise'
+      ? App.call('submitRevision', S.respond.orderNumber, BOOT.token, payload)
+      : App.call('submitOrder', payload);
+
+    p.then(function (res) {
+      S.submitting = false;
+      App.store.set('coffee_name', payload.name);
+      renderDone(res);
+    }).catch(function (err) {
+      S.submitting = false;
+      btn.disabled = false;
+      btn.removeAttribute('aria-busy');
+      btn.textContent = S.mode === 'revise' ? 'Submit updated order' : 'Place order';
+      errBox.textContent = err.message;
+      errBox.hidden = false;
+      errBox.scrollIntoView({ block: 'center' });
+      if (/not available|no longer on the menu/i.test(err.message)) refreshMenu();
+    });
+  }
+
+  /** Reloads the menu after a "not available" error and drops items that disappeared. */
+  function refreshMenu() {
+    App.call('getCustomerBootstrap').then(function (data) {
+      setData(data);
+      var removed = [];
+      Object.keys(S.cart).forEach(function (id) {
+        if (!S.menuById[id] || S.blocked[id]) { removed.push(id); delete S.cart[id]; }
+      });
+      if (removed.length) App.toast('Your cart was updated because some items are no longer available.', 'error');
+    }).catch(function () { /* keep the current screen */ });
+  }
+
+  /* ---------------- done ---------------- */
+
+  function renderDone(res) {
+    cartbar.hidden = true;
+    var revised = S.mode === 'revise';
+    var emailNote = res.emailSent
+      ? 'A confirmation email was sent to ' + res.customerEmail + '.'
+      : 'Your order was received, but we could not send a confirmation email. Please note your order number.';
+    App.clear(app).appendChild(h('section', { class: 'panel center', role: 'status' },
+      h('h2', null, revised ? 'Order updated!' : 'Order received!'),
+      h('p', { class: 'muted' }, 'Your order number is'),
+      h('div', { class: 'big-number', 'aria-label': 'Order number ' + res.orderNumber }, '#' + res.orderNumber),
+      h('div', { style: 'text-align:left' }, summaryTable(res.items, res.total)),
+      h('p', { style: 'margin-top:12px' }, h('strong', null, res.delivery ? 'Delivery to room ' + res.room : 'Pickup at the coffee shop'), ' · Paying by ' + String(res.payment).toLowerCase()),
+      h('p', { class: 'small muted' }, emailNote),
+      revised
+        ? h('a', { class: 'btn primary', href: BOOT.baseUrl || '#', target: '_top' }, 'Start a new order')
+        : h('button', { type: 'button', class: 'btn primary', onclick: resetOrder }, 'Place another order')));
+    var heading = app.querySelector('h2');
+    if (heading) { heading.setAttribute('tabindex', '-1'); heading.focus(); }
+    window.scrollTo(0, 0);
+  }
+
+  function resetOrder() {
+    S.cart = {};
+    S.delivery = null;
+    S.room = '';
+    S.payment = '';
+    S.requestId = App.uuid();
+    if (!S.data.orderingOpen) return renderClosed();
+    go('menu');
+  }
+
+  function renderClosed() {
+    cartbar.hidden = true;
+    App.clear(app).appendChild(h('section', { class: 'panel center' },
+      h('h2', null, 'Ordering is closed'),
+      h('p', null, S.data.closedMessage || 'Please check back later.'),
+      h('button', { type: 'button', class: 'btn', onclick: init }, 'Check again')));
+  }
+
+  /* ---------------- unavailable-item responses ---------------- */
+
+  function startRevision() {
+    var r = S.respond;
+    S.mode = 'revise';
+    S.blocked = {};
+    r.unavailable.forEach(function (u) { S.blocked[u.id] = true; });
+    S.cart = {};
+    var missing = [];
+    r.remaining.forEach(function (l) {
+      if (S.menuById[l.id]) S.cart[l.id] = Math.min(l.qty, S.data.rules.maxQtyPerItem);
+      else missing.push(l.name);
+    });
+    S.notice = missing.length ? 'Also no longer on the menu: ' + missing.join(', ') + '.' : '';
+    S.delivery = S.data.rules.deliveryEnabled ? r.delivery : false;
+    S.room = r.room || '';
+    S.payment = r.payment || '';
+    S.name = r.customerName || S.name;
+    go('menu');
+  }
+
+  function renderRespond() {
+    var r = S.respond;
+    cartbar.hidden = true;
+    var names = r.unavailable.map(function (u) { return u.name; }).join(', ');
+    var plural = r.unavailable.length > 1;
+    var errBox = h('div', { class: 'alert error', role: 'alert', hidden: true });
+    var buttons = [];
+
+    function act(fnName, busyText, confirmFirst) {
+      return function (e) {
+        var btn = e.currentTarget;
+        var start = confirmFirst
+          ? App.confirm('Cancel order #' + r.orderNumber + '?', 'Your order will be cancelled. This cannot be undone.', 'Cancel my order', true)
+          : Promise.resolve(true);
+        start.then(function (ok) {
+          if (!ok) return;
+          buttons.forEach(function (b) { b.disabled = true; });
+          var label = btn.textContent;
+          btn.textContent = busyText;
+          errBox.hidden = true;
+          App.call(fnName, r.orderNumber, BOOT.token).then(function (res) {
+            renderResponseDone(fnName, res);
+          }).catch(function (err) {
+            buttons.forEach(function (b) { b.disabled = false; });
+            btn.textContent = label;
+            errBox.textContent = err.message;
+            errBox.hidden = false;
+          });
+        });
+      };
+    }
+
+    var continueBtn = r.remaining.length
+      ? h('button', { type: 'button', class: 'btn ok block', onclick: act('respondContinue', 'Updating…') }, 'Continue without ' + (plural ? 'these items' : 'this item'))
+      : null;
+    var reviseBtn = h('button', { type: 'button', class: 'btn primary block', onclick: startRevision }, 'Revise my order');
+    var cancelBtn = h('button', { type: 'button', class: 'btn danger block', onclick: act(r.remaining.length ? 'respondCancel' : 'respondContinue', 'Cancelling…', true) }, 'Cancel my order');
+    buttons = [continueBtn, reviseBtn, cancelBtn].filter(Boolean);
+
+    App.clear(app).appendChild(h('section', { class: 'panel stack' },
+      h('h2', null, names + (plural ? ' are' : ' is') + ' no longer available'),
+      h('p', null, 'Order #' + r.orderNumber + ' is on hold until you choose what to do.'),
+      r.remaining.length
+        ? h('div', null, h('h3', null, 'Your remaining items'), summaryTable(r.remaining, r.newTotal),
+            h('p', { class: 'small muted' }, 'Original total was ' + App.money(r.originalTotal) + '.'))
+        : h('div', { class: 'alert warn' }, 'None of your items are available. You can revise your order or cancel it.'),
+      errBox,
+      buttons,
+      r.expiresAt ? h('p', { class: 'hint center' }, 'This link expires ' + App.dateTime(r.expiresAt) + '.') : null));
+    var heading = app.querySelector('h2');
+    if (heading) { heading.setAttribute('tabindex', '-1'); heading.focus(); }
+  }
+
+  function renderResponseDone(fnName, res) {
+    var cancelled = fnName === 'respondCancel' || res.cancelled || res.status === 'Cancelled';
+    App.clear(app).appendChild(h('section', { class: 'panel center', role: 'status' },
+      h('h2', null, cancelled ? 'Order cancelled' : 'Thanks — your order is back in the queue'),
+      cancelled
+        ? h('p', null, 'Order #' + res.orderNumber + ' has been cancelled. No payment is due.')
+        : h('div', null,
+            h('div', { class: 'big-number' }, '#' + res.orderNumber),
+            h('div', { style: 'text-align:left' }, summaryTable(res.items, res.total))),
+      h('a', { class: 'btn primary', href: BOOT.baseUrl || '#', target: '_top' }, 'Start a new order')));
+    var heading = app.querySelector('h2');
+    if (heading) { heading.setAttribute('tabindex', '-1'); heading.focus(); }
+  }
+
+  init();
+})();
+</script>

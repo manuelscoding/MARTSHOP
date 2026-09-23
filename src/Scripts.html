@@ -1,0 +1,180 @@
+<script>
+/**
+ * Scripts.html — shared browser helpers for the customer and shop pages.
+ *
+ * SECURITY: all user-provided text is put on the page with textContent (via
+ * App.h), never innerHTML, so names/notes cannot inject HTML or scripts.
+ */
+var App = (function () {
+  'use strict';
+
+  /** Calls a server function. Resolves with data, rejects with a friendly Error. */
+  function call(fnName) {
+    var args = Array.prototype.slice.call(arguments, 1);
+    return new Promise(function (resolve, reject) {
+      google.script.run
+        .withSuccessHandler(function (res) {
+          if (!res || typeof res !== 'object') return reject(new Error('No response from the server. Please try again.'));
+          if (res.ok) resolve(res.data);
+          else reject(new Error(res.error || 'Something went wrong. Please try again.'));
+        })
+        .withFailureHandler(function (err) {
+          var msg = String((err && err.message) || err || '');
+          if (/authoriz|permission|login|sign in|401|403/i.test(msg)) {
+            reject(new Error('Your session may have expired. Please reload the page.'));
+          } else {
+            reject(new Error('Could not reach the server. Check your connection and try again.'));
+          }
+        })[fnName].apply(null, args);
+    });
+  }
+
+  /**
+   * Creates an element. attrs: class, text, html is NOT supported on purpose.
+   * on<Event>: handler. Anything else becomes an attribute (or property for
+   * value/checked/disabled). Children: nodes or strings (as text).
+   */
+  function h(tag, attrs) {
+    var el = document.createElement(tag);
+    attrs = attrs || {};
+    Object.keys(attrs).forEach(function (k) {
+      var v = attrs[k];
+      if (v === null || v === undefined || v === false) return;
+      if (k === 'class') el.className = v;
+      else if (k === 'text') el.textContent = String(v);
+      else if (k.indexOf('on') === 0 && typeof v === 'function') el.addEventListener(k.slice(2).toLowerCase(), v);
+      else if (k === 'value' || k === 'checked' || k === 'disabled') el[k] = v;
+      else el.setAttribute(k, v === true ? '' : String(v));
+    });
+    for (var i = 2; i < arguments.length; i++) append(el, arguments[i]);
+    return el;
+  }
+  function append(el, child) {
+    if (child === null || child === undefined || child === false) return;
+    if (Array.isArray(child)) { child.forEach(function (c) { append(el, c); }); return; }
+    el.appendChild(typeof child === 'object' ? child : document.createTextNode(String(child)));
+  }
+  function clear(el) { while (el.firstChild) el.removeChild(el.firstChild); return el; }
+
+  var currency = '$';
+  function setCurrency(c) { currency = c || '$'; }
+  function money(n) { return currency + (Math.round(Number(n || 0) * 100) / 100).toFixed(2); }
+  function cents(n) { return Math.round(Number(n || 0) * 100); }
+
+  function timeAgo(ms, now) {
+    var sec = Math.max(0, Math.floor(((now || Date.now()) - ms) / 1000));
+    if (sec < 45) return 'just now';
+    var min = Math.floor(sec / 60);
+    if (min < 1) return '1 min';
+    if (min < 60) return min + ' min';
+    var hr = Math.floor(min / 60);
+    var rem = min % 60;
+    if (hr < 24) return hr + ' hr' + (rem ? ' ' + rem + ' min' : '');
+    var d = Math.floor(hr / 24);
+    return d + ' day' + (d > 1 ? 's' : '');
+  }
+  function time(ms) {
+    return ms ? new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+  }
+  function dateTime(ms) {
+    return ms ? new Date(ms).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+  }
+
+  var toastTimer = null;
+  function toast(msg, type) {
+    var el = document.getElementById('toast');
+    if (!el) return;
+    el.textContent = msg;
+    el.className = type || '';
+    el.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.hidden = true; }, type === 'error' ? 7000 : 3500);
+  }
+
+  function uuid() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    var a = new Uint8Array(16);
+    (window.crypto || window.msCrypto).getRandomValues(a);
+    return Array.prototype.map.call(a, function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+  }
+
+  /**
+   * Accessible modal. opts: {title, body: Node|string, buttons:[{label, class, value}], onOpen}
+   * Resolves with the clicked button's value (or null if dismissed).
+   */
+  function modal(opts) {
+    return new Promise(function (resolve) {
+      var previous = document.activeElement;
+      var titleId = 'm' + Math.random().toString(36).slice(2);
+      var backdrop, box;
+      function close(v) {
+        document.removeEventListener('keydown', onKey, true);
+        if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
+        if (previous && previous.focus) try { previous.focus(); } catch (e) { /* element gone */ }
+        resolve(v);
+      }
+      function onKey(e) {
+        if (e.key === 'Escape') { e.preventDefault(); close(null); }
+        if (e.key === 'Tab') {                          // keep focus inside the dialog
+          var f = box.querySelectorAll('button, input, textarea, select, a[href]');
+          if (!f.length) return;
+          var first = f[0], last = f[f.length - 1];
+          if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+          else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+        }
+      }
+      var buttons = (opts.buttons || [{ label: 'OK', class: 'btn primary', value: true }]).map(function (b) {
+        return h('button', { type: 'button', class: b.class || 'btn', onclick: function () {
+          if (b.validate && !b.validate()) return;
+          close(b.value);
+        } }, b.label);
+      });
+      box = h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': titleId },
+        h('h2', { id: titleId, text: opts.title }),
+        typeof opts.body === 'string' ? h('p', { text: opts.body }) : opts.body,
+        h('div', { class: 'actions' }, buttons));
+      backdrop = h('div', { class: 'modal-backdrop', onclick: function (e) { if (e.target === backdrop) close(null); } }, box);
+      document.body.appendChild(backdrop);
+      document.addEventListener('keydown', onKey, true);
+      var focusTarget = box.querySelector('input, textarea') || buttons[buttons.length - 1];
+      if (focusTarget) focusTarget.focus();
+      if (opts.onOpen) opts.onOpen(box);
+    });
+  }
+
+  function confirm(title, body, confirmLabel, danger) {
+    return modal({
+      title: title,
+      body: body,
+      buttons: [
+        { label: 'Go back', class: 'btn', value: false },
+        { label: confirmLabel || 'Confirm', class: danger ? 'btn danger solid' : 'btn primary', value: true }
+      ]
+    }).then(function (v) { return v === true; });
+  }
+
+  function loading(text) {
+    return h('div', { class: 'loading', role: 'status' }, h('div', { class: 'spinner', 'aria-hidden': 'true' }), h('span', { text: text || 'Loading…' }));
+  }
+
+  function errorPanel(message, onRetry) {
+    return h('div', { class: 'panel', role: 'alert' },
+      h('div', { class: 'alert error', text: message }),
+      onRetry ? h('button', { type: 'button', class: 'btn primary', onclick: onRetry }, 'Try again') : null);
+  }
+
+  function statusClass(status) { return 'badge status-' + String(status || '').replace(/[^A-Za-z]/g, ''); }
+
+  var store = {
+    get: function (k) { try { return window.localStorage.getItem(k); } catch (e) { return null; } },
+    set: function (k, v) { try { window.localStorage.setItem(k, v); } catch (e) { /* storage blocked */ } }
+  };
+
+  return {
+    call: call, h: h, clear: clear, money: money, cents: cents, setCurrency: setCurrency,
+    timeAgo: timeAgo, time: time, dateTime: dateTime, toast: toast, uuid: uuid,
+    modal: modal, confirm: confirm, loading: loading, errorPanel: errorPanel,
+    statusClass: statusClass, store: store
+  };
+})();
+</script>
