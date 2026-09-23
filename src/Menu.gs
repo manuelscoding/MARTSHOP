@@ -6,7 +6,17 @@
  *   ItemID     short unique code, e.g. LATTE (never change it once used)
  *   Available  checkbox (TRUE/FALSE); unchecked items are hidden from customers
  *   SortOrder  lower numbers appear first
+ *   Icon       optional emoji shown on the menu card, e.g. 🥤 (blank = category default)
+ *   Tag        optional short badge, e.g. Hot, Iced, Spicy, Seasonal, House special
  */
+
+/** Icon used when an item's Icon cell is blank. */
+function defaultIcon_(category) {
+  var c = String(category || '').toLowerCase();
+  if (/snack|food|treat|bak/.test(c)) return '🍪';
+  if (/coffee|hot/.test(c)) return '☕';
+  return '🥤';
+}
 
 /** All valid menu rows, sorted for display. Invalid rows are skipped. */
 function readMenu_() {
@@ -31,6 +41,8 @@ function readMenu_() {
       available: avail === true || String(avail).trim().toUpperCase() === 'TRUE',
       category: t.idx.hasOwnProperty('Category') ? (String(r[t.idx.Category] || '').trim() || 'Menu') : 'Menu',
       sortOrder: t.idx.hasOwnProperty('SortOrder') && isFinite(Number(r[t.idx.SortOrder])) && r[t.idx.SortOrder] !== '' ? Number(r[t.idx.SortOrder]) : 9999,
+      icon: t.idx.hasOwnProperty('Icon') ? cleanText_(r[t.idx.Icon], 8) : '',
+      tag: t.idx.hasOwnProperty('Tag') ? cleanText_(r[t.idx.Tag], 20) : '',
       row: i + 2
     });
   });
@@ -40,6 +52,7 @@ function readMenu_() {
   items.forEach(function (it) {
     if (!catOrder.hasOwnProperty(it.category) || it.sortOrder < catOrder[it.category]) catOrder[it.category] = it.sortOrder;
   });
+  items.forEach(function (it) { if (!it.icon) it.icon = defaultIcon_(it.category); });
   items.sort(function (a, b) {
     if (a.category !== b.category) {
       return (catOrder[a.category] - catOrder[b.category]) || a.category.localeCompare(b.category);
@@ -47,6 +60,17 @@ function readMenu_() {
     return (a.sortOrder - b.sortOrder) || a.name.localeCompare(b.name);
   });
   return items;
+}
+
+/** ItemID -> icon, so the dashboard can show icons next to order lines. */
+function getMenuIcons_() {
+  var icons = {};
+  try {
+    readMenu_().forEach(function (it) { icons[it.id] = it.icon; });
+  } catch (e) {
+    logError_('getMenuIcons_', e);   // icons are decoration only; never block the dashboard
+  }
+  return icons;
 }
 
 /** ItemID -> menu item. */
@@ -65,13 +89,14 @@ function getCustomerBootstrap() {
     var win = getOrderingWindow_(rules);
     var menu = readMenu_()
       .filter(function (it) { return it.available; })
-      .map(function (it) { return { id: it.id, name: it.name, price: it.price, category: it.category }; });
+      .map(function (it) { return { id: it.id, name: it.name, price: it.price, category: it.category, icon: it.icon, tag: it.tag }; });
     return {
       shopName: s.SHOP_NAME,
       currency: s.CURRENCY_SYMBOL,
       user: { email: ctx.email, suggestedName: nameFromEmail_(ctx.email), isShopStaff: ctx.isShopStaff },
       orderingOpen: win.open,
       closedMessage: win.message,
+      hours: win.hours,
       menu: menu,
       rules: {
         deliveryEnabled: rules.deliveryEnabled,
@@ -100,7 +125,7 @@ function getMenuAdmin() {
   return api_('getMenuAdmin', function () {
     requireStaff_();
     return readMenu_().map(function (it) {
-      return { id: it.id, name: it.name, price: it.price, available: it.available, category: it.category };
+      return { id: it.id, name: it.name, price: it.price, available: it.available, category: it.category, icon: it.icon, tag: it.tag };
     });
   });
 }

@@ -12,12 +12,13 @@
     <span id="userEmail" class="user"></span>
   </header>
 
-  <main id="app" class="page" tabindex="-1" aria-live="polite">
+  <main id="app" class="page" tabindex="-1">
     <div class="loading" role="status"><div class="spinner" aria-hidden="true"></div><span>Loading…</span></div>
   </main>
 
   <div id="cartbar" class="cartbar" hidden>
     <div class="inner">
+      <div id="cartIcons" class="cart-icons" aria-hidden="true"></div>
       <div>
         <div class="small muted" id="cartCount">0 items</div>
         <div class="total" id="cartTotal" aria-live="polite">$0.00</div>
@@ -27,6 +28,7 @@
     </div>
   </div>
 
+  <div id="menuStatus" class="sr-only" role="status" aria-live="polite"></div>
   <div id="toast" role="status" aria-live="polite" hidden></div>
 
   <noscript><p class="panel">This app needs JavaScript. Please enable it and reload.</p></noscript>

@@ -25,7 +25,7 @@ var CONFIG = Object.freeze({
   // Column headers. Code looks columns up BY NAME, so you may reorder columns
   // in the sheet, but do not rename or delete them.
   HEADERS: Object.freeze({
-    MENU: ['ItemID', 'Name', 'Price', 'Available', 'Category', 'SortOrder'],
+    MENU: ['ItemID', 'Name', 'Price', 'Available', 'Category', 'SortOrder', 'Icon', 'Tag'],
     ORDERS: [
       'OrderNumber', 'Timestamp', 'CustomerEmail', 'CustomerName', 'ItemsJSON',
       'Total', 'Delivery', 'RoomNumber', 'PaymentMethod', 'Status',

@@ -32,6 +32,8 @@
     requestId: App.uuid(),
     submitting: false,
     respond: null,         // getResponseContext() result
+    filterCat: '',         // category chip selected on the menu ('' = all)
+    search: '',            // menu search text
     notice: ''
   };
 
@@ -71,7 +73,15 @@
     if (!S.name) S.name = App.store.get('coffee_name') || data.user.suggestedName || '';
   }
 
+  // Keep the sticky menu filters just below the (possibly wrapped) header.
+  function syncTopbar() {
+    var bar = document.querySelector('.topbar');
+    if (bar) document.documentElement.style.setProperty('--topbar-h', bar.offsetHeight + 'px');
+  }
+  window.addEventListener('resize', syncTopbar);
+
   function go(step) {
+    syncTopbar();
     S.step = step;
     cartbar.hidden = step !== 'menu';
     if (step === 'menu') renderMenu();
@@ -102,7 +112,7 @@
 
   function cartLines() {
     return S.data.menu.filter(function (it) { return S.cart[it.id] > 0; }).map(function (it) {
-      return { id: it.id, name: it.name, price: it.price, qty: S.cart[it.id] };
+      return { id: it.id, name: it.name, icon: it.icon, price: it.price, qty: S.cart[it.id] };
     });
   }
   function cartQty() {
@@ -128,19 +138,39 @@
   }
 
   function updateItemRow(id) {
-    var row = document.getElementById('item-' + cssId(id));
-    if (!row) return;
+    var card = document.getElementById('item-' + cssId(id));
+    if (!card) return;
     var q = S.cart[id] || 0;
-    row.classList.toggle('in-cart', q > 0);
-    row.querySelector('input').value = q;
-    row.querySelector('.minus').disabled = q <= 0;
-    row.querySelector('.plus').disabled = q >= S.data.rules.maxQtyPerItem;
+    var wasIn = card.classList.contains('in-cart');
+    card.classList.toggle('in-cart', q > 0);
+    card.querySelector('.add-btn').hidden = q > 0;
+    card.querySelector('.stepper').hidden = q === 0;
+    card.querySelector('input').value = q;
+    card.querySelector('.plus').disabled = q >= S.data.rules.maxQtyPerItem;
+    var bubble = card.querySelector('.mcard-qty');
+    bubble.hidden = q === 0;
+    bubble.textContent = String(q);
+    if (q > 0 && !wasIn) pop(card);
+  }
+
+  /** Small "added" animation (skipped when the user prefers reduced motion). */
+  function pop(el) {
+    el.classList.remove('pop');
+    void el.offsetWidth;
+    el.classList.add('pop');
   }
 
   function updateCartBar() {
     var n = cartQty();
     document.getElementById('cartCount').textContent = n + (n === 1 ? ' item' : ' items');
-    document.getElementById('cartTotal').textContent = App.money(cartTotal());
+    var totalEl = document.getElementById('cartTotal');
+    var total = App.money(cartTotal());
+    if (totalEl.textContent !== total) { totalEl.textContent = total; pop(totalEl); }
+    var icons = document.getElementById('cartIcons');
+    App.clear(icons);
+    cartLines().slice(0, 6).forEach(function (l) {
+      icons.appendChild(h('span', { class: 'cart-icon', title: l.qty + ' × ' + l.name }, l.icon || '•'));
+    });
     var btn = document.getElementById('cartContinue');
     btn.disabled = n === 0;
     btn.setAttribute('aria-disabled', n === 0 ? 'true' : 'false');
@@ -155,34 +185,137 @@
 
   /* ---------------- step 1: menu ---------------- */
 
+  // Accent colors for categories; any other category gets a stable color from its name.
+  var CATEGORY_ACCENTS = { drinks: '#0f6e8c', snacks: '#b4480f' };
+
+  function slug(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''); }
+
+  function accentFor(category) {
+    var key = slug(category);
+    if (CATEGORY_ACCENTS[key]) return CATEGORY_ACCENTS[key];
+    var hash = 0;
+    for (var i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) % 360;
+    return 'hsl(' + hash + ', 55%, 32%)';
+  }
+
+  function priceTag(n) {
+    return Number(n) % 1 === 0 ? S.data.currency + Number(n) : App.money(n);
+  }
+
+  function greeting() {
+    var hr = new Date().getHours();
+    var part = hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : 'Good evening';
+    var first = String(S.name || '').trim().split(/\s+/)[0];
+    return part + (first ? ', ' + first : '') + '!';
+  }
+
+  function heroSection() {
+    return h('section', { class: 'hero' },
+      h('div', { class: 'hero-text' },
+        h('p', { class: 'hello' }, greeting()),
+        h('h2', null, S.mode === 'revise' ? 'Update your order' : 'What can we get you?')),
+      S.data.orderingOpen
+        ? h('span', { class: 'open-pill' }, h('span', { class: 'dot', 'aria-hidden': 'true' }), 'Open now', S.data.hours ? h('span', { class: 'hours' }, ' · ' + S.data.hours) : null)
+        : null);
+  }
+
   function renderMenu() {
     var items = S.data.menu.filter(function (it) { return !S.blocked[it.id]; });
-    var list = [];
-    var lastCat = null;
-    items.forEach(function (it) {
-      if (it.category !== lastCat) { list.push(h('h3', { class: 'category', text: it.category })); lastCat = it.category; }
-      var q = S.cart[it.id] || 0;
-      var input = h('input', {
-        type: 'number', inputmode: 'numeric', min: '0', max: String(S.data.rules.maxQtyPerItem), step: '1',
-        value: String(q), 'aria-label': 'Quantity of ' + it.name,
-        onchange: function (e) { setQty(it.id, e.target.value); }
-      });
-      list.push(h('div', { class: 'menu-item' + (q ? ' in-cart' : ''), id: 'item-' + cssId(it.id) },
-        h('div', { class: 'info' }, h('div', { class: 'name', text: it.name }), h('div', { class: 'muted', text: App.money(it.price) })),
-        h('div', { class: 'stepper' },
-          h('button', { type: 'button', class: 'minus', 'aria-label': 'Remove one ' + it.name, disabled: q <= 0,
-            onclick: function () { setQty(it.id, (S.cart[it.id] || 0) - 1); } }, '−'),
-          input,
-          h('button', { type: 'button', class: 'plus', 'aria-label': 'Add one ' + it.name, disabled: q >= S.data.rules.maxQtyPerItem,
-            onclick: function () { setQty(it.id, (S.cart[it.id] || 0) + 1); } }, '+'))));
+    var categories = [];
+    items.forEach(function (it) { if (categories.indexOf(it.category) === -1) categories.push(it.category); });
+    if (S.filterCat && categories.indexOf(S.filterCat) === -1) S.filterCat = '';
+
+    var sections = h('div', { id: 'menuSections' });
+    var chips = h('div', { class: 'chips', role: 'group', 'aria-label': 'Show category' });
+    var search = h('input', {
+      type: 'search', id: 'menuSearch', placeholder: 'Search the menu', value: S.search || '', autocomplete: 'off',
+      'aria-label': 'Search the menu',
+      oninput: function (e) { S.search = e.target.value; drawSections(); }
     });
+
+    function chip(label, cat, icon, count) {
+      return h('button', { type: 'button', class: 'chip', 'aria-pressed': String((S.filterCat || '') === cat),
+        style: cat ? '--accent:' + accentFor(cat) : null,
+        onclick: function () {
+          S.filterCat = cat;
+          Array.prototype.forEach.call(chips.children, function (c) { c.setAttribute('aria-pressed', 'false'); });
+          this.setAttribute('aria-pressed', 'true');
+          drawSections();
+        } },
+        icon ? h('span', { 'aria-hidden': 'true' }, icon + ' ') : null, label,
+        count !== undefined ? h('span', { class: 'chip-count' }, String(count)) : null);
+    }
+    if (categories.length > 1) {
+      chips.appendChild(chip('All', ''));
+      categories.forEach(function (cat) {
+        var inCat = items.filter(function (it) { return it.category === cat; });
+        chips.appendChild(chip(cat, cat, inCat[0].icon, inCat.length));
+      });
+    }
+
+    function drawSections() {
+      var q = String(S.search || '').trim().toLowerCase();
+      App.clear(sections);
+      var shown = 0;
+      categories.forEach(function (cat) {
+        if (S.filterCat && S.filterCat !== cat) return;
+        var inCat = items.filter(function (it) {
+          return it.category === cat && (!q || it.name.toLowerCase().indexOf(q) !== -1 || String(it.tag || '').toLowerCase().indexOf(q) !== -1);
+        });
+        if (!inCat.length) return;
+        shown += inCat.length;
+        sections.appendChild(h('section', { class: 'menu-section', style: '--accent:' + accentFor(cat), 'aria-label': cat },
+          h('h3', { class: 'section-title' }, h('span', { 'aria-hidden': 'true' }, inCat[0].icon + ' '), cat,
+            h('span', { class: 'section-count' }, inCat.length + (inCat.length === 1 ? ' item' : ' items'))),
+          h('div', { class: 'menu-grid' }, inCat.map(itemCard))));
+      });
+      var status = document.getElementById('menuStatus');
+      if (status) status.textContent = (q || S.filterCat) ? shown + (shown === 1 ? ' item' : ' items') + ' shown' : '';
+      if (!shown) {
+        sections.appendChild(h('div', { class: 'panel empty' }, q ? 'Nothing matches "' + S.search.trim() + '".' : 'Nothing is available right now. Please check back later.'));
+      }
+    }
 
     App.clear(app).appendChild(h('div', null,
       stepsNav(),
       reviseBanner(),
-      h('h2', null, S.mode === 'revise' ? 'Update your items' : 'What would you like?'),
-      items.length ? list : h('div', { class: 'panel empty', text: 'Nothing is available right now. Please check back later.' })));
+      heroSection(),
+      items.length ? h('div', { class: 'menu-tools' }, chips, h('div', { class: 'search-wrap' }, search)) : null,
+      sections));
+    drawSections();
     updateCartBar();
+  }
+
+  function itemCard(it) {
+    var q = S.cart[it.id] || 0;
+    var max = S.data.rules.maxQtyPerItem;
+    var addBtn = h('button', { type: 'button', class: 'add-btn', 'aria-label': 'Add one ' + it.name + ', ' + App.money(it.price), hidden: q > 0,
+      onclick: function () { setQty(it.id, 1); focusIn(it.id, '.plus'); } }, 'Add');
+    var input = h('input', {
+      type: 'number', inputmode: 'numeric', min: '0', max: String(max), step: '1',
+      value: String(q), 'aria-label': 'Quantity of ' + it.name,
+      onchange: function (e) { setQty(it.id, e.target.value); if (!S.cart[it.id]) focusIn(it.id, '.add-btn'); }
+    });
+    var stepper = h('div', { class: 'stepper', hidden: q === 0 },
+      h('button', { type: 'button', class: 'minus', 'aria-label': 'Remove one ' + it.name,
+        onclick: function () { setQty(it.id, (S.cart[it.id] || 0) - 1); if (!S.cart[it.id]) focusIn(it.id, '.add-btn'); } }, '−'),
+      input,
+      h('button', { type: 'button', class: 'plus', 'aria-label': 'Add one ' + it.name, disabled: q >= max,
+        onclick: function () { setQty(it.id, (S.cart[it.id] || 0) + 1); } }, '+'));
+
+    return h('article', { class: 'mcard' + (q ? ' in-cart' : ''), id: 'item-' + cssId(it.id) },
+      it.tag ? h('span', { class: 'mcard-tag tag-' + slug(it.tag) }, it.tag) : null,
+      h('span', { class: 'mcard-qty', 'aria-hidden': 'true', hidden: q === 0 }, String(q)),
+      h('div', { class: 'mcard-icon', 'aria-hidden': 'true' }, it.icon || '•'),
+      h('h4', { class: 'mcard-name' }, it.name),
+      h('div', { class: 'mcard-price' }, priceTag(it.price)),
+      h('div', { class: 'mcard-actions' }, addBtn, stepper));
+  }
+
+  function focusIn(id, selector) {
+    var card = document.getElementById('item-' + cssId(id));
+    var el = card && card.querySelector(selector);
+    if (el && !el.hidden) el.focus();
   }
 
   /* ---------------- step 2: delivery ---------------- */
@@ -296,10 +429,14 @@
       h('tbody', null,
         lines.map(function (l) {
           return h('tr', null,
-            h('td', null, l.qty + ' × ' + l.name),
+            h('td', null, iconFor(l) ? h('span', { class: 'line-icon', 'aria-hidden': 'true' }, iconFor(l)) : null, l.qty + ' × ' + l.name),
             h('td', { class: 'num' }, App.money(App.cents(l.price) * l.qty / 100)));
         }),
         h('tr', { class: 'total' }, h('td', null, 'Total'), h('td', { class: 'num' }, App.money(total)))));
+  }
+
+  function iconFor(line) {
+    return line.icon || (S.menuById[line.id] && S.menuById[line.id].icon) || '';
   }
 
   function renderReview() {

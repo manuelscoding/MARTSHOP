@@ -54,16 +54,35 @@ Things you might want to change live in **three places**. Always use the first o
 
 **What it does.** The list of items and prices customers see. Prices are **only** ever taken from here, so a customer can't change a price in their browser.
 
+`setup()` loads the shop's starting menu: 12 **Drinks** and 8 **Snacks**. Customers see each item as a card with:
+- a large **icon** (emoji)
+- the name and price
+- an optional colored **tag** such as HOT, ICED, SPICY, SPECIAL or SEASONAL
+- an **Add** button, which turns into − / + controls once the item is in the order
+
+Customers can filter by category with the chips at the top (All / Drinks / Snacks) or type in **Search the menu**. The items they've picked appear as small icons in the bar at the bottom, next to the running total. The dashboard shows the same icons beside each order line, so baristas can scan orders quickly.
+
 **Where it lives.**
 - The **Menu** tab.
 - Code: `Menu.gs` → `readMenu_()` (reads and sorts), `getCustomerBootstrap()` (sends available items to customers), `getMenuAdmin()` / `setMenuItemAvailability()` (dashboard Menu tab).
 
 **How to change it safely.**
-- **Add an item:** add a row with a new unique `ItemID` (letters/numbers, no spaces), `Name`, `Price` (a number like `3.25`), tick `Available`, and fill in `Category` and `SortOrder`.
+- **Add an item:** add a row with a new unique `ItemID` (letters/numbers, no spaces), `Name`, `Price` (a number like `3.25`), tick `Available`, and fill in `Category` and `SortOrder`. Optionally fill in `Icon` and `Tag` (below).
+- **Icon:** paste one emoji into the `Icon` cell (on a Chromebook: Search + Shift + Space; on Windows: Windows key + period; on a Mac: Ctrl + Cmd + Space). If it's blank, the item gets its category's icon.
+- **Tag:** a short word shown as a badge on the card. These words get special colors:
+  - `Hot` or `Spicy`: red
+  - `Iced` or `Cold`: blue
+  - `Seasonal`: gold
+  - `Special`, `New` or `Fan favorite`: purple
+
+  Any other word shows in gray. Keep it short (one or two words) so it fits on phones.
+- **Seasonal Treat:** rename it for the season (e.g. "Pumpkin Bread"), change its icon, and keep the `Seasonal` tag.
+- **Category colors:** Drinks are teal and Snacks are orange. A new category (e.g. `Breakfast`) automatically gets its own color. To pick a specific color, add it to `CATEGORY_ACCENTS` near the top of the menu code in `CustomerJs.html`.
 - **Change a price:** edit `Price`. New orders use it immediately. Existing orders keep the price they were placed at.
 - **Temporarily unavailable:** untick `Available`, or use the dashboard's **Menu** tab.
 - **Order on screen:** categories appear in the order of their smallest `SortOrder`, and items within a category by `SortOrder`. Leave gaps (10, 20, 30…) so new items can go in between.
 - Rows with a missing ID/name, an invalid price or a duplicate ID are **skipped**, not shown.
+- **Already ran `setup()` with the old sample menu?** `setup()` only fills an **empty** Menu tab. Delete all rows under the header in the Menu tab, then run **Coffee Shop → Run setup / repair sheets**. It also adds the new `Icon` and `Tag` columns.
 
 ## 3. Customer ordering
 

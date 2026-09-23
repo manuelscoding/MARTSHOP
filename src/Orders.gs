@@ -151,7 +151,8 @@ function appendNote_(o, note) {
 }
 
 /** Order shape sent to the shop dashboard (dates as numbers — google.script.run cannot return Date objects). */
-function toStaffOrder_(o) {
+function toStaffOrder_(o, icons) {
+  icons = icons || {};
   return {
     orderNumber: o.orderNumber,
     timestamp: o.timestamp,
@@ -159,7 +160,7 @@ function toStaffOrder_(o) {
     customerName: o.customerName,
     customerType: o.customerType,
     items: o.items.map(function (l) {
-      return { id: l.id, name: l.name, price: l.price, qty: l.qty, lineTotal: centsToAmount_(toCents_(l.price) * l.qty), unavailable: !!l.unavailable };
+      return { id: l.id, name: l.name, icon: icons[l.id] || '', price: l.price, qty: l.qty, lineTotal: centsToAmount_(toCents_(l.price) * l.qty), unavailable: !!l.unavailable };
     }),
     total: o.total,
     totalIfContinued: centsToAmount_(totalCents_(o.items, false)),
@@ -396,7 +397,8 @@ function getActiveOrders(sinceVersion) {
     var data = loadOrders_();
     var active = data.orders.filter(function (o) { return CONFIG.ACTIVE_STATUSES.indexOf(o.status) !== -1; });
     active.sort(function (a, b) { return (a.timestamp - b.timestamp) || (a.orderNumber - b.orderNumber); });
-    return { version: version, serverNow: Date.now(), orders: active.map(toStaffOrder_) };
+    var icons = getMenuIcons_();
+    return { version: version, serverNow: Date.now(), orders: active.map(function (o) { return toStaffOrder_(o, icons); }) };
   });
 }
 
@@ -572,10 +574,11 @@ function getHistory(query) {
       return true;
     });
     matches.sort(function (a, b) { return (b.timestamp - a.timestamp) || (b.orderNumber - a.orderNumber); });
+    var icons = getMenuIcons_();
     return {
       totalMatches: matches.length,
       limited: matches.length > s.HISTORY_MAX_RESULTS,
-      orders: matches.slice(0, s.HISTORY_MAX_RESULTS).map(toStaffOrder_)
+      orders: matches.slice(0, s.HISTORY_MAX_RESULTS).map(function (o) { return toStaffOrder_(o, icons); })
     };
   });
 }

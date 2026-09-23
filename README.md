@@ -15,7 +15,7 @@ A web app for a school coffee shop run by staff. It uses a Google Sheet as the d
 
 ## Assumptions
 
-1. **Placeholders.** `yourschool.org` stands in for your domain. `setup()` fills in `ALLOWED_DOMAINS` from the deploying account's own domain. The menu is a **sample** that you edit in the **Menu** sheet. Shop staff are listed in the **Staff** sheet, which `setup()` seeds with the script owner as `Admin`.
+1. **Placeholders.** `yourschool.org` stands in for your domain. `setup()` fills in `ALLOWED_DOMAINS` from the deploying account's own domain. `setup()` loads the shop's **real starting menu** (12 drinks, 8 snacks, with icons and tags), which you keep up to date in the **Menu** sheet. Shop staff are listed in the **Staff** sheet, which `setup()` seeds with the script owner as `Admin`.
 2. **One deployment serves both apps.**
    - `…/exec` is the customer app.
    - `…/exec?page=shop` is the staff dashboard.

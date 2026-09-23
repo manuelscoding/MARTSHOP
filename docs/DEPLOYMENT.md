@@ -64,7 +64,7 @@ Allow about 20 minutes. You need a Google Workspace account on your school domai
    - `ORDER_DAYS`, `ORDER_OPEN_TIME`, `ORDER_CLOSE_TIME`: blank means no limit
    - `REPLY_TO_EMAIL` (optional)
    - While testing, set `SEND_EMAILS` to `FALSE` if you don't want real emails to go out.
-2. **Menu** tab. Replace the sample items. Give each a short unique `ItemID` (e.g. `LATTE`), a `Name`, a `Price`, a ticked `Available` box, a `Category` and a `SortOrder`.
+2. **Menu** tab. It already holds the shop's menu (Drinks and Snacks, with prices, icons and tags). Check the prices, and rename **Seasonal Treat** for the current season if you like. Each row has a short unique `ItemID`, `Name`, `Price`, `Available` checkbox, `Category`, `SortOrder`, and optional `Icon` (an emoji) and `Tag` (e.g. `Hot`).
 3. **Staff** tab. Add one row per shop staff member: `Email`, `Name`, `Role` (`Admin` or `Staff`).
 4. Choose **Coffee Shop → Clear settings cache** so the changes apply immediately. Otherwise they apply within 60 seconds.
 

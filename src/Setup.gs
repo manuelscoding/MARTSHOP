@@ -4,25 +4,34 @@
  * Run setup() from the Apps Script editor (or Coffee Shop > Run setup in the
  * Sheet). It:
  *   - creates any missing sheets and header columns
- *   - adds a sample menu ONLY if the Menu sheet is empty
+ *   - adds the starting menu ONLY if the Menu sheet is empty
  *   - adds any missing Settings keys (never overwrites your values)
  *   - adds you as an Admin in the Staff sheet if it is empty
  * Running it again will NOT erase orders, menu items, settings or staff.
  */
 
 var SAMPLE_MENU_ = [
-  ['DRIP', 'Drip Coffee', 2.00, true, 'Coffee', 10],
-  ['AMER', 'Americano', 2.75, true, 'Coffee', 20],
-  ['LATTE', 'Latte', 3.50, true, 'Espresso', 30],
-  ['CAPP', 'Cappuccino', 3.50, true, 'Espresso', 40],
-  ['MOCHA', 'Mocha', 4.00, true, 'Espresso', 50],
-  ['CHAI', 'Chai Latte', 3.75, true, 'Tea & Other', 60],
-  ['TEA', 'Hot Tea', 1.50, true, 'Tea & Other', 70],
-  ['COCOA', 'Hot Chocolate', 2.50, true, 'Tea & Other', 80],
-  ['ICED', 'Iced Coffee', 3.00, true, 'Cold Drinks', 90],
-  ['WATER', 'Bottled Water', 1.00, true, 'Cold Drinks', 100],
-  ['MUFFIN', 'Blueberry Muffin', 2.50, true, 'Snacks', 110],
-  ['BAGEL', 'Bagel with Cream Cheese', 2.75, true, 'Snacks', 120]
+  // ItemID, Name, Price, Available, Category, SortOrder, Icon, Tag
+  ['COKE', 'Coca Cola', 1, true, 'Drinks', 10, '🥤', ''],
+  ['DIETCOKE', 'Diet Coke', 1, true, 'Drinks', 20, '🥤', ''],
+  ['SPRITE', 'Sprite', 1, true, 'Drinks', 30, '🍋', ''],
+  ['DIETDRPEPPER', 'Diet Dr Pepper', 1, true, 'Drinks', 40, '🥤', ''],
+  ['GATORADE', 'Gatorade', 2, true, 'Drinks', 50, '🏅', ''],
+  ['HOTTEA', 'Hot Tea', 2, true, 'Drinks', 60, '🍵', 'Hot'],
+  ['ALANINU', 'Alani Nu', 3, true, 'Drinks', 70, '⚡', ''],
+  ['POPPI', 'Poppi', 3, true, 'Drinks', 80, '🍹', ''],
+  ['PROTEIN', 'Protein Shake', 3, true, 'Drinks', 90, '💪', ''],
+  ['HOTCHOC', 'Hot Chocolate', 3, true, 'Drinks', 100, '🍫', 'Hot'],
+  ['HOTCOFFEE', 'Hot Coffee', 3, true, 'Drinks', 110, '☕', 'Hot'],
+  ['ICEDCOFFEE', 'Iced Coffee', 3, true, 'Drinks', 120, '🧊', 'Iced'],
+  ['TAKIS', 'Takis', 1, true, 'Snacks', 210, '🌶️', 'Spicy'],
+  ['LAYS', 'Lays', 1, true, 'Snacks', 220, '🥔', ''],
+  ['DORITOS', 'Doritos', 1, true, 'Snacks', 230, '🧀', ''],
+  ['SPARTAN', 'Spartan Special', 1, true, 'Snacks', 240, '🛡️', 'Special'],
+  ['HONEYBUN', 'Honey Bun', 2, true, 'Snacks', 250, '🍯', ''],
+  ['FUDGESTRIPES', 'Fudge Stripes', 2, true, 'Snacks', 260, '🍪', ''],
+  ['MUFFIN', 'Muffins', 2, true, 'Snacks', 270, '🧁', ''],
+  ['SEASONAL', 'Seasonal Treat', 2, true, 'Snacks', 280, '✨', 'Seasonal']
 ];
 
 function setup() {

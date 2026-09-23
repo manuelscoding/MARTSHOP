@@ -32,11 +32,11 @@ Tip: set `ORDER_OPEN_TIME` and `ORDER_CLOSE_TIME` to blank while testing, so the
 | 1.1 | Outsider opens the customer URL | Google blocks them, or the app shows **Access denied** / "could not confirm your account". No menu is shown. |
 | 1.2 | Teacher A opens `…/exec?page=shop` | **Access denied: only for coffee shop staff.** |
 | 1.3 🤖 | Teacher A opens the customer page, then in the browser console runs `google.script.run.withSuccessHandler(console.log).getActiveOrders('')` | `{ok:false, error:"This area is only for coffee shop staff."}` |
-| 1.4 🤖 | Same as 1.3 with `completeOrder(1)`, `cancelOrder(1,'x')`, `markItemsUnavailable(1,['LATTE'],false)`, `getHistory({})`, `setMenuItemAvailability('LATTE',false)` | All refused with the staff-only message. No order changes. |
+| 1.4 🤖 | Same as 1.3 with `completeOrder(1)`, `cancelOrder(1,'x')`, `markItemsUnavailable(1,['COKE'],false)`, `getHistory({})`, `setMenuItemAvailability('COKE',false)` | All refused with the staff-only message. No order changes. |
 | 1.5 🤖 | Teacher A runs `google.script.run.setup()` or `archiveOldOrders({triggerUid:'x'})` in the console | Refused: "Only the owner…" |
 | 1.6 | Barista opens `?page=shop` | Dashboard loads. The Barista's email is shown top right. |
 | 1.7 | Remove the Barista from the Staff tab, then **Clear settings cache**, then reload | Access denied. Put them back afterwards. |
-| 1.8 🤖 | Teacher A (console) runs `submitOrder({items:[{id:'LATTE',qty:1,price:0.01}],name:'A',delivery:false,payment:'Cash'})` | The order is priced at the **Menu** price, not $0.01. |
+| 1.8 🤖 | Teacher A (console) runs `submitOrder({items:[{id:'ICEDCOFFEE',qty:1,price:0.01}],name:'A',delivery:false,payment:'Cash'})` | The order is priced at the **Menu** price, not $0.01. |
 
 ## 2. Duplicate submissions
 
@@ -60,12 +60,12 @@ Tip: set `ORDER_OPEN_TIME` and `ORDER_CLOSE_TIME` to blank while testing, so the
 
 | # | Steps | Expected |
 |---|---|---|
-| 4.1 | Teacher A orders 2 × Latte + 1 × Muffin with delivery to room 214 | The dashboard shows it with **NEW**, **DELIVERY ROOM 214** and the correct total. |
-| 4.2 🤖 | Barista: **Item unavailable** → tick Muffin → tick "Also turn these items off on the menu" → **Email customer** | The card turns amber: **Awaiting Customer Response**, Muffin struck through, "Waiting on customer: …". Muffin is off in the Menu tab. |
-| 4.3 | Teacher A checks email | The subject is "action needed for order #N". The body says "Blueberry Muffin is no longer available", lists the remaining items, and shows the **new total**. It has two buttons. |
+| 4.1 | Teacher A orders 2 × Iced Coffee + 1 × Muffins with delivery to room 214 | The dashboard shows it with **NEW**, **DELIVERY ROOM 214** and the correct total. |
+| 4.2 🤖 | Barista: **Item unavailable** → tick Muffins → tick "Also turn these items off on the menu" → **Email customer** | The card turns amber: **Awaiting Customer Response**, Muffins struck through, "Waiting on customer: …". Muffins is off in the Menu tab. |
+| 4.3 | Teacher A checks email | The subject is "action needed for order #N". The body says "Muffins is no longer available", lists the remaining items, and shows the **new total**. It has two buttons. |
 | 4.4 | Teacher A clicks **Continue without this item** | A page with a summary and buttons (nothing changes yet). |
 | 4.5 🤖 | Teacher A clicks **Continue without this item** on that page | "Thanks — your order is back in the queue". The new total is correct. An "updated" email arrives. |
-| 4.6 | Dashboard | The order is back to **Pending**, marked **UPDATED**. The Muffin line is gone. The total equals Lattes only. |
+| 4.6 | Dashboard | The order is back to **Pending**, marked **UPDATED**. The Muffins line is gone. The total equals the Iced Coffees only ($6). |
 | 4.7 🤖 | Orders sheet | `Total` recalculated, `ResponseToken` blank. `StatusHistory` shows Pending → Awaiting → Pending. |
 
 ## 5. Unavailable-item flow: "Revise my order"
@@ -73,7 +73,7 @@ Tip: set `ORDER_OPEN_TIME` and `ORDER_CLOSE_TIME` to blank while testing, so the
 | # | Steps | Expected |
 |---|---|---|
 | 5.1 | Mark an item unavailable on a new order, then Teacher A clicks **Revise my order** in the email | The ordering app opens with the banner "Revising order #N…". The remaining items are pre-filled. The unavailable item is **not** on the menu. Delivery, room, payment and name are pre-filled. |
-| 5.2 🤖 | Change the items (add a Mocha), go to Review, and **Submit updated order** | "Order updated!" with the **same order number** and a total recalculated from the Menu. Email "Order #N updated". |
+| 5.2 🤖 | Change the items (add a Hot Chocolate), go to Review, and **Submit updated order** | "Order updated!" with the **same order number** and a total recalculated from the Menu. Email "Order #N updated". |
 | 5.3 | Dashboard / Orders sheet | Still **one** row for that number. Status Pending, **UPDATED** badge, new items and total. History timeline shows "Order revised by customer". |
 | 5.4 | Mark **all** items unavailable, then the customer clicks **Continue** → **Cancel my order** | The order is cancelled and the customer sees "Order cancelled". |
 
@@ -93,10 +93,10 @@ Tip: set `ORDER_OPEN_TIME` and `ORDER_CLOSE_TIME` to blank while testing, so the
 
 | # | Steps | Expected |
 |---|---|---|
-| 7.1 🤖 | Order 2 × Latte ($3.50) + 1 × Muffin ($2.50) | Total **$9.50** everywhere: confirmation, email, dashboard, sheet. |
-| 7.2 | While the customer is on the Review screen, change the Latte price in the Menu sheet to $4.00, then submit | The order is saved at **$4.00** (the server price). The confirmation shows the server total. |
-| 7.3 🤖 | Continue without the Muffin | New total **$7.00** (calculated from the stored line prices). |
-| 7.4 🤖 | Revise to 2 × Cappuccino + 1 × Drip | New total **$9.00** (current Menu prices). |
+| 7.1 🤖 | Order 2 × Iced Coffee ($3) + 1 × Muffins ($2) | Total **$8.00** everywhere: confirmation, email, dashboard, sheet. |
+| 7.2 | While the customer is on the Review screen, change the Iced Coffee price in the Menu sheet to $4, then submit | The order is saved at **$4.00** (the server price). The confirmation shows the server total. |
+| 7.3 🤖 | Continue without the Muffins | New total **$6.00** (calculated from the stored line prices). |
+| 7.4 🤖 | Revise to 2 × Hot Chocolate ($3) + 1 × Coca Cola ($1) | New total **$7.00** (current Menu prices). |
 | 7.5 🤖 | Quantity limits: type 0, 1.5, -1, or 11 in a quantity box, or send them via the console | The browser clamps them. The server rejects them with "Quantities must be whole numbers from 1 to 10." |
 | 7.6 | Untick an item in Menu while it's in someone's cart, then submit | "X is not available right now…". The cart refreshes and the item is removed. |
 

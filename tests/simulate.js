@@ -182,18 +182,53 @@ test('setup() creates sheets and is owner-only', () => {
   as(ownerEmail);
   g.setup();
   ['Menu', 'Orders', 'Staff', 'Settings', 'Errors'].forEach(n => assert.ok(sheets[n], n));
-  assert.strictEqual(sheets.Menu.getLastRow(), 13);
+  assert.strictEqual(sheets.Menu.getLastRow(), 21);           // 20 starting items + header
   g.setup(); // idempotent
-  assert.strictEqual(sheets.Menu.getLastRow(), 13);
+  assert.strictEqual(sheets.Menu.getLastRow(), 21);
+  same(sheets.Menu.data[0], ['ItemID', 'Name', 'Price', 'Available', 'Category', 'SortOrder', 'Icon', 'Tag']);
   assert.strictEqual(sheets.Settings.data.filter(r => r[0] === 'SHOP_NAME').length, 1);
   assert.strictEqual(orderSettings('ALLOWED_DOMAINS'), 'school.org');
   sheets.Staff.appendRow([STAFF, 'Barista', 'Staff']);
   cacheMap.delete('staff_v1');
-  setSetting('ORDER_OPEN_TIME', '');   // make tests independent of the clock
+  setSetting('ORDER_OPEN_TIME', '');   // make tests independent of the clock (see also next test)
   setSetting('ORDER_CLOSE_TIME', '');
   setSetting('ORDER_DAYS', '');
 });
 function orderSettings(k) { return sheets.Settings.data.find(r => r[0] === k)[1]; }
+
+test('starting menu: drinks then snacks, prices, icons and tags', () => {
+  as(TEACHER);
+  const menu = ok(g.getCustomerBootstrap()).menu;
+  assert.strictEqual(menu.length, 20);
+  same(menu.filter(i => i.category === 'Drinks').map(i => i.name), ['Coca Cola', 'Diet Coke', 'Sprite', 'Diet Dr Pepper', 'Gatorade',
+    'Hot Tea', 'Alani Nu', 'Poppi', 'Protein Shake', 'Hot Chocolate', 'Hot Coffee', 'Iced Coffee']);
+  same(menu.filter(i => i.category === 'Snacks').map(i => i.name), ['Takis', 'Lays', 'Doritos', 'Spartan Special', 'Honey Bun',
+    'Fudge Stripes', 'Muffins', 'Seasonal Treat']);
+  const price = n => menu.find(i => i.name === n).price;
+  same([price('Coca Cola'), price('Gatorade'), price('Alani Nu'), price('Iced Coffee'), price('Takis'), price('Honey Bun'), price('Seasonal Treat')], [1, 2, 3, 3, 1, 2, 2]);
+  assert.ok(menu.every(i => i.icon));
+  assert.strictEqual(menu.find(i => i.id === 'SPARTAN').tag, 'Special');
+  // An order is priced from these values: 2 Coke + 1 Iced Coffee + 1 Takis = $6
+  as(ownerEmail);
+  setSetting('ORDER_OPEN_TIME', ''); setSetting('ORDER_CLOSE_TIME', ''); setSetting('ORDER_DAYS', '');
+  as(TEACHER);
+  const o = ok(g.submitOrder({ items: [{ id: 'COKE', qty: 2 }, { id: 'ICEDCOFFEE', qty: 1 }, { id: 'TAKIS', qty: 1 }], name: 'Jane', delivery: false, payment: 'Cash' }));
+  assert.strictEqual(o.total, 6);
+  // Reset: remove that order and load a fixed test menu so later checks use known prices.
+  sheets.Orders.data.length = 1;
+  props.set('LAST_ORDER_NUMBER', '0');
+  mail.length = 0;
+  sheets.Menu.data.length = 1;
+  [['DRIP', 'Drip Coffee', 2.00, true, 'Coffee', 10, '', ''], ['AMER', 'Americano', 2.75, true, 'Coffee', 20, '', ''],
+   ['LATTE', 'Latte', 3.50, true, 'Espresso', 30, '', ''], ['CAPP', 'Cappuccino', 3.50, true, 'Espresso', 40, '', ''],
+   ['MOCHA', 'Mocha', 4.00, true, 'Espresso', 50, '', ''], ['CHAI', 'Chai Latte', 3.75, true, 'Tea', 60, '', ''],
+   ['TEA', 'Hot Tea', 1.50, true, 'Tea', 70, '', ''], ['COCOA', 'Hot Chocolate', 2.50, true, 'Tea', 80, '', ''],
+   ['ICED', 'Iced Coffee', 3.00, true, 'Cold', 90, '', ''], ['WATER', 'Water', 1.00, true, 'Cold', 100, '', ''],
+   ['MUFFIN', 'Blueberry Muffin', 2.50, true, 'Snacks', 110, '', ''], ['BAGEL', 'Bagel', 2.75, true, 'Snacks', 120, '', '']
+  ].forEach(r => sheets.Menu.appendRow(r));
+  // Blank Icon cells fall back to a category icon.
+  assert.ok(ok(g.getCustomerBootstrap()).menu.every(i => i.icon));
+});
 
 test('unauthorized users are rejected on every function', () => {
   as(OUTSIDER);

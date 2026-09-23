@@ -165,6 +165,7 @@
       h('ul', { class: 'order-items' }, o.items.map(function (l) {
         return h('li', { class: l.unavailable ? 'unavail' : '' },
           h('span', { class: 'qty' }, l.qty + '×'),
+          l.icon ? h('span', { class: 'icon', 'aria-hidden': 'true' }, l.icon) : null,
           h('span', { class: 'label' }, l.name),
           l.unavailable ? h('span', { class: 'tag-unavail' }, 'UNAVAILABLE') : null,
           h('span', { class: 'price' }, App.money(l.lineTotal)));
@@ -450,6 +451,7 @@
         var input = h('input', { type: 'checkbox', role: 'switch', id: id, checked: it.available, 'aria-label': it.name + ' available' });
         var row = h('div', { class: 'menu-admin-item' + (it.available ? '' : ' off') },
           h('label', { class: 'switch', for: id }, input, h('span', { class: 'track', 'aria-hidden': 'true' })),
+          it.icon ? h('span', { class: 'icon', 'aria-hidden': 'true' }, it.icon) : null,
           h('div', { style: 'flex:1' }, h('strong', null, it.name), h('div', { class: 'small muted' }, App.money(it.price))),
           h('span', { class: 'small', 'data-state': '' }, it.available ? 'Available' : 'Off'));
         input.addEventListener('change', function () {
