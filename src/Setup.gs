@@ -94,18 +94,28 @@ function setup() {
   // --- Errors ---
   ensureSheet_(ss, CONFIG.SHEETS.ERRORS, CONFIG.HEADERS.ERRORS);
 
+  // Warn (not block) anyone editing app-managed tabs by hand. The app itself
+  // runs as the owner and is unaffected.
+  [CONFIG.SHEETS.ORDERS, CONFIG.SHEETS.ERRORS, CONFIG.SHEETS.ARCHIVE].forEach(function (name) {
+    var sh = ss.getSheetByName(name);
+    if (sh && sh.getProtections(SpreadsheetApp.ProtectionType.SHEET).length === 0) {
+      sh.protect().setDescription('Managed by the Coffee Shop app. Use the dashboard instead of editing here.').setWarningOnly(true);
+    }
+  });
+
   var props = PropertiesService.getScriptProperties();
   if (!props.getProperty('LAST_ORDER_NUMBER')) props.setProperty('LAST_ORDER_NUMBER', '0');
   if (!props.getProperty('ORDERS_VERSION')) touchOrdersVersion_();
 
-  CacheService.getScriptCache().removeAll(['settings_v1', 'staff_v1']);
+  CacheService.getScriptCache().removeAll(['settings_v1', 'staff_v1', 'icons_v1']);
   settingsMemo_ = null;
   staffMemo_ = null;
 
   var msg = 'Setup complete.\n\n' +
     '1. Check the Settings sheet (ALLOWED_DOMAINS is "' + getSettings_().ALLOWED_DOMAINS + '").\n' +
     '2. Edit the Menu and Staff sheets.\n' +
-    '3. Deploy > New deployment > Web app (Execute as: Me, Who has access: Anyone within your domain).';
+    '3. Deploy > New deployment > Web app (Execute as: Me, Who has access: Anyone within your domain).\n' +
+    '4. Run Coffee Shop > Check setup before announcing the app.';
   console.log(msg);
   try { SpreadsheetApp.getUi().alert(msg); } catch (e) { /* run from editor */ }
   return msg;
@@ -169,10 +179,143 @@ function showLinks() {
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('Coffee Shop')
     .addItem('Run setup / repair sheets', 'setup')
+    .addItem('Check setup (health check)', 'checkSetup')
     .addItem('Show web app links', 'showLinks')
     .addItem('Clear settings cache', 'clearCache')
     .addSeparator()
     .addItem('Archive old orders now', 'archiveOldOrders')
     .addItem('Install maintenance triggers', 'installTriggers')
     .addToUi();
+}
+
+/**
+ * Health check: looks for the configuration mistakes that most often break a
+ * live launch, and reports them in plain language. Changes nothing.
+ * Run it from Coffee Shop > Check setup (health check).
+ * Returns { errors: [...], warnings: [...], info: [...] }.
+ */
+function checkSetup() {
+  requireOwner_();
+  CacheService.getScriptCache().removeAll(['settings_v1', 'staff_v1', 'icons_v1']);
+  settingsMemo_ = null;
+  staffMemo_ = null;
+  var errors = [];
+  var warnings = [];
+  var info = [];
+  var ss = getSs_();
+
+  // 1. Sheets and headers
+  var required = {};
+  required[CONFIG.SHEETS.MENU] = CONFIG.HEADERS.MENU;
+  required[CONFIG.SHEETS.ORDERS] = CONFIG.HEADERS.ORDERS;
+  required[CONFIG.SHEETS.STAFF] = CONFIG.HEADERS.STAFF;
+  required[CONFIG.SHEETS.SETTINGS] = CONFIG.HEADERS.SETTINGS;
+  required[CONFIG.SHEETS.ERRORS] = CONFIG.HEADERS.ERRORS;
+  var sheetsOk = true;
+  Object.keys(required).forEach(function (name) {
+    var sh = ss.getSheetByName(name);
+    if (!sh) { errors.push('The "' + name + '" tab is missing. Run Coffee Shop > Run setup.'); sheetsOk = false; return; }
+    var have = sh.getLastColumn() ? sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(function (h) { return String(h).trim(); }) : [];
+    var missing = required[name].filter(function (h) { return have.indexOf(h) === -1; });
+    if (missing.length) { errors.push('The "' + name + '" tab is missing column(s): ' + missing.join(', ') + '. Run Coffee Shop > Run setup.'); sheetsOk = false; }
+  });
+  if (!sheetsOk) return reportHealth_(errors, warnings, info);
+
+  var s = getSettings_();
+  var owner = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
+  var ownerDomain = owner.split('@')[1] || '';
+
+  // 2. Access
+  var domains = splitList_(s.ALLOWED_DOMAINS);
+  if (!domains.length || domains.indexOf('yourschool.org') !== -1) {
+    errors.push('Settings > ALLOWED_DOMAINS is still the placeholder. Set it to your school domain (e.g. district.org).');
+  } else if (ownerDomain && domains.indexOf(ownerDomain) === -1) {
+    warnings.push('The owner account (' + owner + ') is not on ALLOWED_DOMAINS (' + domains.join(', ') + '). Check the domain is spelled correctly.');
+  }
+  domains.forEach(function (d) {
+    if (d.indexOf('@') !== -1 || d.indexOf(' ') !== -1) errors.push('ALLOWED_DOMAINS entry "' + d + '" should be just the domain, like district.org (no @).');
+  });
+  if (s.STUDENT_EMAIL_PATTERN) {
+    try { new RegExp(s.STUDENT_EMAIL_PATTERN); } catch (e) { errors.push('Settings > STUDENT_EMAIL_PATTERN is not a valid pattern.'); }
+  }
+  var staff = getStaffMap_();
+  var staffEmails = Object.keys(staff);
+  if (!staffEmails.length) errors.push('The Staff tab has no valid email addresses, so nobody can open the shop dashboard.');
+  staffEmails.forEach(function (email) {
+    var domain = email.split('@')[1];
+    if (domains.indexOf(domain) === -1) warnings.push('Staff member ' + email + ' is not on ALLOWED_DOMAINS, so they cannot open the dashboard.');
+    else if (isStudentLocalPart_(email.split('@')[0], s.STUDENT_EMAIL_PATTERN)) warnings.push('Staff member ' + email + ' looks like a STUDENT account (STUDENT_EMAIL_PATTERN), so they cannot open the dashboard.');
+  });
+  info.push(staffEmails.length + ' staff account(s) can use the dashboard.');
+
+  // 3. Menu
+  var t = readTable_(CONFIG.SHEETS.MENU, ['ItemID']);
+  var nonBlank = t.rows.filter(function (r) { return String(r[t.idx.ItemID] || '').trim() || String(r[t.idx.Name] || '').trim(); }).length;
+  var menu = readMenu_();
+  var available = menu.filter(function (it) { return it.available; }).length;
+  if (nonBlank > menu.length) warnings.push((nonBlank - menu.length) + ' Menu row(s) are skipped because of a missing ItemID/Name, an invalid Price, or a duplicate ItemID.');
+  if (!available) errors.push('No menu items are marked Available, so customers will see an empty menu.');
+  info.push(menu.length + ' menu item(s), ' + available + ' available.');
+
+  // 4. Settings values
+  try { new RegExp(s.ROOM_PATTERN); } catch (e) { errors.push('Settings > ROOM_PATTERN is not a valid pattern; the default is being used.'); }
+  ['ORDER_OPEN_TIME', 'ORDER_CLOSE_TIME', 'STUDENT_ORDER_OPEN_TIME', 'STUDENT_ORDER_CLOSE_TIME'].forEach(function (k) {
+    if (s[k] && !normalizeTime_(s[k])) errors.push('Settings > ' + k + ' "' + s[k] + '" is not a 24-hour time like 07:30. It is being ignored.');
+  });
+  var validDays = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+  ['ORDER_DAYS', 'STUDENT_ORDER_DAYS'].forEach(function (k) {
+    splitList_(s[k]).forEach(function (d) {
+      if (validDays.indexOf(d.slice(0, 3)) === -1) errors.push('Settings > ' + k + ' contains "' + d + '". Use Mon,Tue,Wed,Thu,Fri,Sat,Sun.');
+    });
+  });
+  if (!s.ORDERING_ENABLED) warnings.push('ORDERING_ENABLED is FALSE: customers cannot order right now.');
+  if (s.REPLY_TO_EMAIL && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s.REPLY_TO_EMAIL)) warnings.push('Settings > REPLY_TO_EMAIL is not a valid email and is being ignored.');
+  if (!s.ADMIN_ALERT_EMAIL) warnings.push('Settings > ADMIN_ALERT_EMAIL is blank. Set it so someone is emailed if the app hits an error.');
+  info.push('Hours: ' + describeHours_(getRules_({ customerType: CONFIG.CUSTOMER_TYPES.STAFF })) + ' (script time zone ' + s.TIMEZONE + ').');
+
+  // 5. Deployment and email
+  var url = webAppUrl_();
+  if (!url) {
+    errors.push('The web app is not deployed yet. In the Apps Script editor: Deploy > New deployment > Web app.');
+  } else if (!s.WEB_APP_URL) {
+    warnings.push('Settings > WEB_APP_URL is blank. Paste the /exec deployment URL there so email links always open the live app.');
+  } else if (!/\/exec$/.test(s.WEB_APP_URL)) {
+    errors.push('Settings > WEB_APP_URL should be the live link ending in /exec (it is "' + s.WEB_APP_URL + '").');
+  }
+  if (url) info.push('Customer link: ' + url + '   Dashboard: ' + url + '?page=shop');
+  if (!s.SEND_EMAILS) warnings.push('SEND_EMAILS is FALSE: customers get no confirmation or "item unavailable" emails.');
+  info.push('Emails left today: ' + MailApp.getRemainingDailyQuota() + '.');
+
+  // 6. Maintenance
+  var handlers = ScriptApp.getProjectTriggers().map(function (tr) { return tr.getHandlerFunction(); });
+  if (handlers.indexOf('archiveOldOrders') === -1) warnings.push('Maintenance triggers are not installed (nightly archiving and log clean-up). Run Coffee Shop > Install maintenance triggers.');
+  var errSheet = ss.getSheetByName(CONFIG.SHEETS.ERRORS);
+  var recentErrors = 0;
+  if (errSheet.getLastRow() > 1) {
+    var dayAgo = Date.now() - 86400000;
+    recentErrors = errSheet.getRange(2, 1, errSheet.getLastRow() - 1, 1).getValues()
+      .filter(function (r) { return toMs_(r[0]) > dayAgo; }).length;
+  }
+  if (recentErrors) warnings.push(recentErrors + ' error(s) were logged in the last 24 hours. See the Errors tab.');
+
+  return reportHealth_(errors, warnings, info);
+}
+
+function reportHealth_(errors, warnings, info) {
+  var lines = [];
+  lines.push(errors.length ? '❌ ' + errors.length + ' problem(s) to fix before going live:' : '✅ No blocking problems found.');
+  errors.forEach(function (m) { lines.push('  • ' + m); });
+  if (warnings.length) {
+    lines.push('', '⚠️ ' + warnings.length + ' warning(s):');
+    warnings.forEach(function (m) { lines.push('  • ' + m); });
+  }
+  if (info.length) {
+    lines.push('', 'ℹ️ Info:');
+    info.forEach(function (m) { lines.push('  • ' + m); });
+  }
+  lines.push('', 'App version ' + CONFIG.APP_VERSION + '.');
+  var text = lines.join('\n');
+  console.log(text);
+  try { SpreadsheetApp.getUi().alert('Coffee Shop health check', text, SpreadsheetApp.getUi().ButtonSet.OK); } catch (e) { /* run from editor */ }
+  return { errors: errors, warnings: warnings, info: info };
 }

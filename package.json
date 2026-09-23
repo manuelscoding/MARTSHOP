@@ -1,0 +1,12 @@
+{
+  "name": "coffee-shop-ordering",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Google Apps Script coffee shop ordering system. The app itself lives in src/ and runs on Google; these scripts only run the developer checks.",
+  "scripts": {
+    "test": "node tests/check.js && node tests/simulate.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

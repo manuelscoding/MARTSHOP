@@ -64,9 +64,12 @@ function readMenu_() {
 
 /** ItemID -> icon, so the dashboard can show icons next to order lines. */
 function getMenuIcons_() {
+  var cached = cacheGet_('icons_v1');
+  if (cached) return JSON.parse(cached);
   var icons = {};
   try {
     readMenu_().forEach(function (it) { icons[it.id] = it.icon; });
+    cachePut_('icons_v1', JSON.stringify(icons), CONFIG.CACHE_SECONDS);
   } catch (e) {
     logError_('getMenuIcons_', e);   // icons are decoration only; never block the dashboard
   }

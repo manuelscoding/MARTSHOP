@@ -21,7 +21,8 @@ var App = (function () {
         .withFailureHandler(function (err) {
           var msg = String((err && err.message) || err || '');
           if (/authoriz|permission|login|sign in|401|403/i.test(msg)) {
-            reject(new Error('Your session may have expired. Please reload the page.'));
+            reject(new Error('Your sign-in session may have expired, or you are signed in to more than one Google account. ' +
+              'Please reload the page. If this keeps happening, use a browser window signed in only to your school account.'));
           } else {
             reject(new Error('Could not reach the server. Check your connection and try again.'));
           }

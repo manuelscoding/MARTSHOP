@@ -29,6 +29,9 @@ function makeSheet(name) {
     insertRowsAfter(after, n) { sheet.maxRows += n; },
     appendRow(values) { const r = sheet.getLastRow() + 1; sheet.getRange(r, 1, 1, values.length).setValues([values]); },
     setFrozenRows() {}, setColumnWidth() {},
+    protections: [],
+    getProtections() { return sheet.protections; },
+    protect() { const pr = { setDescription: () => pr, setWarningOnly: (w) => { pr.warningOnly = w; return pr; } }; sheet.protections.push(pr); return pr; },
     getRange(row, col, nr = 1, nc = 1) {
       if (row < 1 || col < 1) throw new Error('bad range');
       if (row + nr - 1 > sheet.maxRows) throw new Error('The coordinates of the range are outside the dimensions of the sheet.');
@@ -69,7 +72,8 @@ const sheets = {};
 const ss = {
   getSheetByName: n => sheets[n] || null,
   insertSheet: n => (sheets[n] = makeSheet(n)),
-  getId: () => 'SSID'
+  getId: () => 'SSID',
+  getUrl: () => 'https://docs.google.com/spreadsheets/d/SSID'
 };
 
 let activeEmail = 'owner@school.org';
@@ -82,9 +86,11 @@ let mailQuota = 100;
 const g = {
   console: { log() {}, warn() {}, error: (...a) => g.__errors.push(a.join(' ')) },
   __errors: [],
+  __triggers: [],
   SpreadsheetApp: {
     getActiveSpreadsheet: () => ss, openById: () => ss, flush() {},
     getUi() { throw new Error('no ui'); },
+    ProtectionType: { SHEET: 'SHEET' },
     newDataValidation() { const b = { requireCheckbox: () => b, requireValueInList: () => b, build: () => ({}) }; return b; }
   },
   Session: {
@@ -106,7 +112,7 @@ const g = {
   },
   ScriptApp: {
     getService: () => ({ getUrl: () => 'https://script.google.com/a/macros/school.org/s/ABC/exec' }),
-    getProjectTriggers: () => []
+    getProjectTriggers: () => g.__triggers,
   },
   HtmlService: {
     createTemplateFromFile: f => { const t = { evaluate: () => ({ file: f, t, setTitle() { return this; }, addMetaTag() { return this; } }) }; return t; },
@@ -554,11 +560,83 @@ test('archiving moves old closed orders; numbers keep increasing', () => {
   assert.strictEqual(n, lastIssued + 1);   // keeps counting up; archived #1 is never reused
 });
 
+test('health check: flags real launch problems in plain language', () => {
+  as(TEACHER);
+  assert.throws(() => g.checkSetup(), /owner/);
+  as(ownerEmail);
+  let r = g.checkSetup();
+  same(r.errors, []);
+  assert.ok(r.warnings.some(w => /WEB_APP_URL is blank/.test(w)));
+  assert.ok(r.warnings.some(w => /ADMIN_ALERT_EMAIL/.test(w)));
+  assert.ok(r.warnings.some(w => /triggers are not installed/.test(w)));
+  assert.ok(r.info.some(i => /menu item/.test(i)));
+  setSetting('ORDER_CLOSE_TIME', '2:30pm');
+  setSetting('ORDER_DAYS', 'Mon,Tues,Funday');
+  setSetting('ALLOWED_DOMAINS', 'yourschool.org');
+  setSetting('WEB_APP_URL', 'https://script.google.com/a/macros/school.org/s/ABC/dev');
+  r = g.checkSetup();
+  assert.ok(r.errors.some(e => /ORDER_CLOSE_TIME/.test(e)));
+  assert.ok(r.errors.some(e => /"funday"/.test(e)));
+  assert.ok(!r.errors.some(e => /"tues"/.test(e)));
+  assert.ok(r.errors.some(e => /placeholder/.test(e)));
+  assert.ok(r.errors.some(e => /ending in \/exec/.test(e)));
+  setSetting('ORDER_CLOSE_TIME', ''); setSetting('ORDER_DAYS', ''); setSetting('ALLOWED_DOMAINS', 'school.org');
+  setSetting('WEB_APP_URL', 'https://script.google.com/a/macros/school.org/s/ABC/exec');
+  // setup() put warning-only protection on app-managed tabs
+  assert.ok(sheets.Orders.protections.length === 1 && sheets.Orders.protections[0].warningOnly === true);
+  g.setup();
+  assert.strictEqual(sheets.Orders.protections.length, 1);   // not duplicated
+});
+
+test('admin alert email on unexpected errors, at most once per hour', () => {
+  as(ownerEmail);
+  setSetting('ADMIN_ALERT_EMAIL', 'it@school.org');
+  cacheMap.delete('admin_alert_sent');
+  const before = mail.length;
+  vm.runInContext("logError_('testFn', new Error('boom 1')); logError_('testFn', new Error('boom 2'));", g);
+  const alerts = mail.slice(before).filter(m => m.to === 'it@school.org');
+  assert.strictEqual(alerts.length, 1);
+  assert.match(alerts[0].subject, /app error in testFn/);
+  assert.match(alerts[0].body, /boom 1/);
+  setSetting('ADMIN_ALERT_EMAIL', '');
+});
+
+test('error log is trimmed by retention; archive tab recreated if emptied', () => {
+  as(ownerEmail);
+  const e = sheets.Errors;
+  e.appendRow([new Date(Date.now() - 200 * 86400000), 'old', 'old error', 'x@school.org']);
+  const oldCount = e.data.filter((r, i) => i > 0 && r[1] === 'old').length;
+  assert.strictEqual(oldCount, 1);
+  sheets.Archive.data.length = 0;                       // someone cleared the Archive tab
+  const res = g.archiveOldOrders();
+  assert.ok(res.errorsTrimmed >= 1);
+  assert.ok(!e.data.some((r, i) => i > 0 && r[1] === 'old'));
+  assert.strictEqual(sheets.Archive.data[0][0], 'OrderNumber');
+});
+
+test('a failing cache service never breaks ordering or the dashboard', () => {
+  const real = g.CacheService.getScriptCache;
+  g.CacheService.getScriptCache = () => ({
+    get() { throw new Error('Service invoked too many times'); },
+    put() { throw new Error('Service invoked too many times'); },
+    removeAll() {}
+  });
+  try {
+    as(OTHER_TEACHER);
+    ok(g.getCustomerBootstrap());
+    ok(g.submitOrder(order({ name: 'Bob', delivery: false, requestId: 'req-cachefail1' })));
+    as(STAFF);
+    ok(g.getActiveOrders(''));
+  } finally {
+    g.CacheService.getScriptCache = real;
+  }
+});
+
 test('Orders sheet grows past its row limit without errors', () => {
   sheets.Orders.maxRows = sheets.Orders.getLastRow();
   as(OTHER_TEACHER);
   ok(g.submitOrder(order({ name: 'Bob', delivery: false })));
 });
 
-same(g.__errors.filter(e => !/quota|STUDENT_EMAIL_PATTERN/i.test(e)), [], 'unexpected server errors');
+same(g.__errors.filter(e => !/quota|STUDENT_EMAIL_PATTERN|\[testFn\]/i.test(e)), [], 'unexpected server errors');
 console.info('\nAll ' + passed + ' simulated test groups passed.');

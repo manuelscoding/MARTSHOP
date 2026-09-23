@@ -43,10 +43,38 @@ function logError_(fnName, err) {
     var user = '';
     try { user = Session.getActiveUser().getEmail(); } catch (ignore) { /* no user */ }
     var sheet = getSs_().getSheetByName(CONFIG.SHEETS.ERRORS);
-    if (!sheet) return;
-    sheet.appendRow([new Date(), String(fnName), sheetSafe_(message.slice(0, 2000)), user]);
+    if (sheet) sheet.appendRow([new Date(), String(fnName), sheetSafe_(message.slice(0, 2000)), user]);
   } catch (e2) {
     console.error('logError_ failed: ' + e2);
+  }
+  alertAdmin_(fnName, message);
+}
+
+/**
+ * Emails ADMIN_ALERT_EMAIL about an unexpected error, at most once per hour so
+ * a recurring problem cannot flood the inbox or use up the email quota.
+ * Never throws and never calls logError_ (to avoid loops).
+ */
+function alertAdmin_(fnName, message) {
+  try {
+    var to = String(getSettings_().ADMIN_ALERT_EMAIL || '').trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return;
+    var cache = CacheService.getScriptCache();
+    if (cache.get('admin_alert_sent')) return;
+    cache.put('admin_alert_sent', '1', 3600);
+    if (MailApp.getRemainingDailyQuota() < 5) return;   // keep the last few emails for customers
+    var ssUrl = '';
+    try { ssUrl = getSs_().getUrl(); } catch (ignore) { /* no sheet */ }
+    MailApp.sendEmail({
+      to: to,
+      subject: getSettings_().SHOP_NAME + ': app error in ' + fnName,
+      body: 'The coffee shop app hit an unexpected error.\n\nFunction: ' + fnName + '\nTime: ' + new Date() +
+        '\n\n' + String(message).slice(0, 1500) +
+        '\n\nSee the Errors tab for details' + (ssUrl ? ': ' + ssUrl : '.') +
+        '\nYou will get at most one of these alerts per hour.'
+    });
+  } catch (e) {
+    console.error('alertAdmin_ failed: ' + e);
   }
 }
 
@@ -121,6 +149,17 @@ function readTable_(sheetName, requiredHeaders) {
 function ensureRows_(sheet, lastRowNeeded) {
   var max = sheet.getMaxRows();
   if (lastRowNeeded > max) sheet.insertRowsAfter(max, Math.max(lastRowNeeded - max, 200));
+}
+
+/**
+ * CacheService is only a speed-up. It occasionally throws transient errors,
+ * so these wrappers treat any cache failure as a cache miss.
+ */
+function cacheGet_(key) {
+  try { return CacheService.getScriptCache().get(key); } catch (e) { return null; }
+}
+function cachePut_(key, value, seconds) {
+  try { CacheService.getScriptCache().put(key, value, seconds); } catch (e) { /* best-effort */ }
 }
 
 /** HTML-escapes text for emails and server-rendered pages. */
@@ -230,7 +269,8 @@ function parseToken_(v) {
 
 /** Bumps the "orders changed" marker the dashboard polls for. */
 function touchOrdersVersion_() {
-  PropertiesService.getScriptProperties().setProperty('ORDERS_VERSION', String(Date.now()));
+  // Time plus a random part, so two changes in the same millisecond still differ.
+  PropertiesService.getScriptProperties().setProperty('ORDERS_VERSION', Date.now() + '.' + Math.floor(Math.random() * 1e6));
 }
 
 function getOrdersVersion_() {

@@ -307,12 +307,11 @@ function submitOrder(payload) {
 
     // Double-submit protection: the same requestId always returns the same order.
     var requestId = cleanRequestId_(payload.requestId);
-    var cache = CacheService.getScriptCache();
     var dedupeKey = requestId ? ('req_' + Utilities.base64EncodeWebSafe(ctx.email) + '_' + requestId) : '';
 
     var result = withLock_(function () {
       if (dedupeKey) {
-        var prior = cache.get(dedupeKey);
+        var prior = cacheGet_(dedupeKey);
         if (prior) return { duplicate: JSON.parse(prior) };
       }
       var data = loadOrders_();
@@ -348,7 +347,7 @@ function submitOrder(payload) {
       setStatus_(o, CONFIG.STATUS.PENDING, ctx.email, 'Order placed');
       saveOrder_(data, o);
       touchOrdersVersion_();
-      if (dedupeKey) cache.put(dedupeKey, JSON.stringify(toCustomerSummary_(o)), 1800);
+      if (dedupeKey) cachePut_(dedupeKey, JSON.stringify(toCustomerSummary_(o)), 1800);
       return { order: o };
     });
 
@@ -376,6 +375,7 @@ function getShopBootstrap() {
       shopName: s.SHOP_NAME,
       currency: s.CURRENCY_SYMBOL,
       pollSeconds: s.POLL_SECONDS,
+      appVersion: CONFIG.APP_VERSION,
       awaitingWarnMinutes: s.AWAITING_WARN_MINUTES,
       user: { email: ctx.email, name: ctx.staffName, role: ctx.staffRole },
       statuses: CONFIG.STATUS
@@ -391,14 +391,15 @@ function getActiveOrders(sinceVersion) {
   return api_('getActiveOrders', function () {
     requireStaff_();
     var version = getOrdersVersion_();
+    var open = getOrderingWindow_(getRules_(getUserContext_())).open;
     if (sinceVersion && String(sinceVersion) === version) {
-      return { unchanged: true, version: version, serverNow: Date.now() };
+      return { unchanged: true, version: version, serverNow: Date.now(), open: open };
     }
     var data = loadOrders_();
     var active = data.orders.filter(function (o) { return CONFIG.ACTIVE_STATUSES.indexOf(o.status) !== -1; });
     active.sort(function (a, b) { return (a.timestamp - b.timestamp) || (a.orderNumber - b.orderNumber); });
     var icons = getMenuIcons_();
-    return { version: version, serverNow: Date.now(), orders: active.map(function (o) { return toStaffOrder_(o, icons); }) };
+    return { version: version, serverNow: Date.now(), open: open, orders: active.map(function (o) { return toStaffOrder_(o, icons); }) };
   });
 }
 
@@ -727,6 +728,23 @@ function autoCancelStaleOrders(e) {
   return cancelled.length;
 }
 
+/** Deletes Errors-sheet rows older than `days` (0 = keep). Caller holds the lock. */
+function trimErrorLog_(days) {
+  days = Number(days) || 0;
+  var sheet = getSs_().getSheetByName(CONFIG.SHEETS.ERRORS);
+  if (days <= 0 || !sheet || sheet.getLastRow() < 2) return 0;
+  var width = Math.max(sheet.getLastColumn(), CONFIG.HEADERS.ERRORS.length);
+  var rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, width).getValues();
+  var cutoff = Date.now() - days * 86400000;
+  var keep = rows.filter(function (r) { return toMs_(r[0]) >= cutoff; });
+  var removed = rows.length - keep.length;
+  if (removed) {
+    sheet.getRange(2, 1, rows.length, width).clearContent();
+    if (keep.length) sheet.getRange(2, 1, keep.length, width).setValues(keep);
+  }
+  return removed;
+}
+
 /**
  * Moves Completed/Cancelled orders older than ARCHIVE_AFTER_DAYS to the
  * Archive sheet, and (optionally) deletes very old archived rows.
@@ -741,8 +759,8 @@ function archiveOldOrders(e) {
     var ss = getSs_();
     var t = readTable_(CONFIG.SHEETS.ORDERS, CONFIG.HEADERS.ORDERS);
     var archive = ss.getSheetByName(CONFIG.SHEETS.ARCHIVE);
-    if (!archive) {
-      archive = ss.insertSheet(CONFIG.SHEETS.ARCHIVE);
+    if (!archive) archive = ss.insertSheet(CONFIG.SHEETS.ARCHIVE);
+    if (archive.getLastColumn() === 0) {            // new, or emptied by hand
       archive.getRange(1, 1, 1, t.headers.length).setValues([t.headers]).setFontWeight('bold');
       archive.setFrozenRows(1);
     }
@@ -787,11 +805,11 @@ function archiveOldOrders(e) {
         if (aKeep.length) a.sheet.getRange(2, 1, aKeep.length, a.headers.length).setValues(aKeep);
       }
     }
-    return { moved: moved, deleted: deleted };
+    return { moved: moved, deleted: deleted, errorsTrimmed: trimErrorLog_(s.ERROR_LOG_RETENTION_DAYS) };
   });
-  console.log('archiveOldOrders: moved ' + result.moved + ', deleted ' + result.deleted);
+  console.log('archiveOldOrders: moved ' + result.moved + ', deleted ' + result.deleted + ', error rows trimmed ' + result.errorsTrimmed);
   try {
-    if (!e) SpreadsheetApp.getUi().alert('Archived ' + result.moved + ' order(s). Deleted ' + result.deleted + ' old archived order(s).');
+    if (!e) SpreadsheetApp.getUi().alert('Archived ' + result.moved + ' order(s). Deleted ' + result.deleted + ' old archived order(s) and ' + result.errorsTrimmed + ' old error-log row(s).');
   } catch (ignore) { /* not in the Sheet UI */ }
   return result;
 }

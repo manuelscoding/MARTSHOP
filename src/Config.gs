@@ -11,7 +11,7 @@
  */
 
 var CONFIG = Object.freeze({
-  APP_VERSION: '1.0.0',
+  APP_VERSION: '1.1.0',
 
   SHEETS: Object.freeze({
     MENU: 'Menu',
@@ -117,11 +117,13 @@ var DEFAULT_SETTINGS = [
   ['SEND_EMAILS', true, 'FALSE turns off ALL customer emails (useful while testing).'],
   ['EMAIL_ON_COMPLETE', false, 'TRUE emails the customer when staff mark the order Completed ("ready").'],
   ['REPLY_TO_EMAIL', '', 'Optional reply-to address for customer emails (e.g. the shop\'s shared inbox).'],
+  ['ADMIN_ALERT_EMAIL', '', 'Optional. Email address that is alerted (at most once per hour) when the app hits an unexpected error. Recommended.'],
   ['WEB_APP_URL', '', 'Optional. The deployed web app /exec URL used in email links. Blank = detected automatically.'],
 
   // --- Data retention ---
   ['ARCHIVE_AFTER_DAYS', 60, 'Completed/cancelled orders older than this many days move to the Archive sheet when archiving runs. 0 = never archive.'],
   ['DELETE_ARCHIVE_AFTER_DAYS', 0, 'If > 0, archived orders older than this are permanently deleted when archiving runs. 0 = keep forever.'],
+  ['ERROR_LOG_RETENTION_DAYS', 90, 'Rows in the Errors sheet older than this are deleted when archiving runs (they contain user emails). 0 = keep forever.'],
   ['ORDER_NUMBER_START', 1, 'First order number ever issued. Only used before the first order.'],
 
   // --- Student rules (only apply when STUDENT_ORDERING_ENABLED is TRUE) ---
@@ -145,8 +147,7 @@ var settingsMemo_ = null;
  */
 function getSettings_() {
   if (settingsMemo_) return settingsMemo_;
-  var cache = CacheService.getScriptCache();
-  var cached = cache.get('settings_v1');
+  var cached = cacheGet_('settings_v1');
   if (cached) {
     settingsMemo_ = JSON.parse(cached);
     return settingsMemo_;
@@ -191,9 +192,7 @@ function getSettings_() {
   s.TIMEZONE = tz;
 
   settingsMemo_ = s;
-  try {
-    cache.put('settings_v1', JSON.stringify(s), CONFIG.CACHE_SECONDS);
-  } catch (e) { /* cache is best-effort */ }
+  cachePut_('settings_v1', JSON.stringify(s), CONFIG.CACHE_SECONDS);
   return s;
 }
 
@@ -219,7 +218,7 @@ function coerceSetting_(raw, def, tz) {
 /** Clears cached Settings and Staff so sheet edits apply immediately. */
 function clearCache() {
   requireOwner_();
-  CacheService.getScriptCache().removeAll(['settings_v1', 'staff_v1']);
+  CacheService.getScriptCache().removeAll(['settings_v1', 'staff_v1', 'icons_v1']);
   settingsMemo_ = null;
   staffMemo_ = null;
   try {

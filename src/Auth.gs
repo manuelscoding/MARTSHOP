@@ -100,8 +100,7 @@ function requireStaff_() {
 /** Map of lowercase email -> {name, role} from the Staff sheet (cached). */
 function getStaffMap_() {
   if (staffMemo_) return staffMemo_;
-  var cache = CacheService.getScriptCache();
-  var cached = cache.get('staff_v1');
+  var cached = cacheGet_('staff_v1');
   if (cached) {
     staffMemo_ = JSON.parse(cached);
     return staffMemo_;
@@ -118,7 +117,7 @@ function getStaffMap_() {
     };
   });
   staffMemo_ = map;
-  try { cache.put('staff_v1', JSON.stringify(map), CONFIG.CACHE_SECONDS); } catch (e) { /* best-effort */ }
+  cachePut_('staff_v1', JSON.stringify(map), CONFIG.CACHE_SECONDS);
   return map;
 }
 

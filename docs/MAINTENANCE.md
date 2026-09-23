@@ -14,7 +14,7 @@ Things you might want to change live in **three places**. Always use the first o
 |---|---|---|
 | **1. Sheet tabs** (Menu, Staff) | Menu items, prices, availability, who is shop staff | Safe. Changes apply right away. |
 | **2. Settings tab** | Shop name, allowed domains, hours, delivery, limits, emails, student rules | Safe. Changes apply within 60 s, or immediately with **Coffee Shop → Clear settings cache**. |
-| **3. Code** (Extensions → Apps Script) | Wording, layout, new features | Needs care. Test first, then publish a new version (see [Testing changes safely](#testing-changes-safely)). |
+| **3. Code** (Extensions → Apps Script) | Wording, layout, new features | Needs care. Test first, then publish a new version (see [Testing changes safely](#f-testing-changes-safely)). |
 
 ### Golden rules
 
@@ -247,7 +247,7 @@ Customers can filter by category with the chips at the top (All / Drinks / Snack
 
 ## Expanding access to students
 
-Everything below is **off by default**. Do this in a test copy first (see [Testing changes safely](#testing-changes-safely)), and get approval from your principal and your district technology/privacy office.
+Student **ordering** is off by default (student accounts are recognised and refused until you enable it). Do this in a test copy first (see [Testing changes safely](#f-testing-changes-safely)), and get approval from your principal and your district technology/privacy office.
 
 ### A. Telling students apart from teachers
 
@@ -374,6 +374,29 @@ Order records (name, school email, room, what they ordered and when) about ident
 
 ---
 
+## Running the app day to day
+
+| When | Task |
+|---|---|
+| **Every day** | Nothing special. If the dashboard shows the red "out of date" banner, check the Wi-Fi and tap **Reload dashboard**. |
+| **Each week** | Glance at the **Errors** tab. A few rows are normal (e.g. a network blip); many rows of the same error mean something needs fixing. If `ADMIN_ALERT_EMAIL` is set, you're emailed anyway. |
+| **Before a break or holiday** | Settings → `ORDERING_ENABLED` = `FALSE`. Set it back to `TRUE` when the shop reopens. |
+| **Each term** | Update the menu and prices. Rename **Seasonal Treat** for the season. Remove staff who have left from the **Staff** tab. Run **Coffee Shop → Check setup**. |
+| **Each year** | Confirm the owner account is still active. Review the retention settings (`ARCHIVE_AFTER_DAYS`, `DELETE_ARCHIVE_AFTER_DAYS`, `ERROR_LOG_RETENTION_DAYS`) against district policy. |
+| **After any code change** | Test with the `/dev` link first, then publish a **new version** (see [Testing changes safely](#f-testing-changes-safely)). |
+
+**Backups.** Google Sheets keeps a full version history: **File → Version history → See version history**. Use it to restore a tab someone damaged. For an extra copy, use **File → Make a copy** at the end of each term.
+
+**Health check.** **Coffee Shop → Check setup (health check)** is safe to run at any time; it only reads. Run it after changing Settings or the Staff tab.
+
+**Error alerts.** Put an address in `ADMIN_ALERT_EMAIL`. If the app hits an unexpected error, that address gets one email naming the function and error. Further errors within the hour are logged but don't send more email.
+
+**App version.** The version number is at the bottom of the shop dashboard and in the health check. Mention it when reporting a problem.
+
+**For developers.** Run `npm test` before publishing a change. It checks that every file parses and runs the simulated flows. It also fails if a new browser-callable server function is missing its `requireCustomer_()` / `requireStaff_()` / `requireOwner_()` check. GitHub runs the same checks on every push.
+
+---
+
 ## Quick reference: "I want to…"
 
 | I want to… | Do this |
@@ -385,5 +408,8 @@ Order records (name, school email, room, what they ordered and when) about ident
 | Stop delivery | Settings → `DELIVERY_ENABLED` = `FALSE` |
 | Change the email wording | `Email.gs` → edit text inside the quotes → publish a new version |
 | See what went wrong | **Errors** tab, and Apps Script → **Executions** |
+| Check the whole setup is correct | **Coffee Shop → Check setup (health check)** |
+| Get emailed when something breaks | Settings → `ADMIN_ALERT_EMAIL` |
+| Close for a holiday | Settings → `ORDERING_ENABLED` = `FALSE` (back to `TRUE` after) |
 | Find last week's order | Dashboard → **History** → pick the date |
 | Fix a mistakenly completed order | Dashboard → **History** → open it → **Reopen order** |

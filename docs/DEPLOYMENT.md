@@ -63,6 +63,7 @@ Allow about 20 minutes. You need a Google Workspace account on your school domai
    - `STUDENT_EMAIL_PATTERN`: leave as `^[0-9]{3,9}`, so numeric accounts like `1111111@district.org` are treated as students. They are refused until `STUDENT_ORDERING_ENABLED` is `TRUE`.
    - `ORDER_DAYS`, `ORDER_OPEN_TIME`, `ORDER_CLOSE_TIME`: blank means no limit
    - `REPLY_TO_EMAIL` (optional)
+   - `ADMIN_ALERT_EMAIL`: the person (or IT inbox) to email if the app hits an unexpected error. At most one alert per hour. **Recommended.**
    - While testing, set `SEND_EMAILS` to `FALSE` if you don't want real emails to go out.
 2. **Menu** tab. It already holds the shop's menu (Drinks and Snacks, with prices, icons and tags). Check the prices, and rename **Seasonal Treat** for the current season if you like. Each row has a short unique `ItemID`, `Name`, `Price`, `Available` checkbox, `Category`, `SortOrder`, and optional `Icon` (an emoji) and `Tag` (e.g. `Hot`).
 3. **Staff** tab. Add one row per shop staff member: `Email`, `Name`, `Role` (`Admin` or `Staff`).
@@ -92,14 +93,25 @@ You can also get both links from **Coffee Shop → Show web app links** in the S
 - **On the counter tablet:** open the `?page=shop` link, sign in as a staff member listed in the Staff sheet, and add it to the home screen. Tap **Sound: off** to turn on the new-order chime (a tap is required before browsers allow sound).
 - **For customers:** post the ordering link in the staff newsletter or bulletin, on a QR code at the counter, or as a Google Sites button.
 
-## Step 7 (optional): Maintenance triggers
+## Step 7: Maintenance triggers
 
 Choose **Coffee Shop → Install maintenance triggers**. This adds two jobs:
 
-- **Nightly archiving.** Completed and cancelled orders older than `ARCHIVE_AFTER_DAYS` move to an **Archive** tab. This keeps the dashboard fast.
+- **Nightly clean-up (about 2 AM).**
+  - Completed and cancelled orders older than `ARCHIVE_AFTER_DAYS` move to an **Archive** tab. This keeps the dashboard fast.
+  - Rows in the **Errors** tab older than `ERROR_LOG_RETENTION_DAYS` are deleted, because they contain user emails.
 - **Stale-order check every 15 minutes.** It does nothing unless `AUTO_CANCEL_AWAITING_MINUTES` is above 0.
 
-## Step 8: Test before announcing
+## Step 8: Run the health check
+
+Choose **Coffee Shop → Check setup (health check)**. It changes nothing; it only reports.
+
+- **❌ problems** would break the app for users. Examples: the placeholder domain is still set, nobody is in the Staff tab, no menu items are available, a time is typed wrongly, or the app isn't deployed.
+- **⚠️ warnings** are worth fixing. Examples: `WEB_APP_URL` or `ADMIN_ALERT_EMAIL` is blank, the maintenance triggers aren't installed, or a staff email looks like a student account.
+
+Fix everything marked ❌, then run it again until it says **✅ No blocking problems found**.
+
+## Step 9: Test before announcing
 
 Work through [TEST_CHECKLIST.md](TEST_CHECKLIST.md). At minimum:
 
@@ -109,6 +121,25 @@ Work through [TEST_CHECKLIST.md](TEST_CHECKLIST.md). At minimum:
 4. respond from the email
 5. complete the order
 6. find it in History
+
+## Go-live checklist
+
+Tick every line before announcing the app.
+
+- [ ] The app is owned and deployed by a long-lived account (ideally a shared shop or IT account), not a personal account that might leave.
+- [ ] `appsscript.json` → `timeZone` matches your school. The health check shows the time zone it's using.
+- [ ] **Coffee Shop → Check setup** shows ✅ with no ❌ problems.
+- [ ] `WEB_APP_URL` is the `/exec` link, `ADMIN_ALERT_EMAIL` is set, and `SEND_EMAILS` is `TRUE`.
+- [ ] The maintenance triggers are installed.
+- [ ] The test checklist has been run with one staff account, one teacher account and one student account (`1111111@…`). The student is refused until you choose to enable students.
+- [ ] Test orders are cancelled. Optionally delete the test rows from the Orders tab **before** launch (never after).
+- [ ] **Counter tablet:**
+  - plugged in, with the screen set never to sleep while charging
+  - signed in to **only** the staff account
+  - the dashboard link added to the home screen
+  - sound turned on
+- [ ] Only the owner and one backup person have edit access to the Sheet.
+- [ ] Staff know how to handle "item unavailable" and where History is.
 
 ---
 
@@ -142,4 +173,7 @@ Google publishes the current numbers at <https://developers.google.com/apps-scri
 | A staff member can't open the dashboard | Their exact email must be in the **Staff** tab and on an allowed domain. Then clear the cache. |
 | "We could not confirm your school Google account" | The visitor isn't signed in, or is signed in with an account outside your organization. Have them sign out of other accounts or use a separate browser profile. |
 | Email links point at `/dev` or are missing | Set `WEB_APP_URL` in Settings to the `/exec` URL. |
+| "Your sign-in session may have expired, or you are signed in to more than one Google account" | This is a known Google limitation. The app can fail when a browser is signed in to several Google accounts at once (e.g. school + personal). Use a Chrome profile or window signed in **only** to the school account. |
+| Dashboard shows a red "This list may be out of date" banner | The tablet couldn't reach Google several times in a row. Check the Wi-Fi, then tap **Reload dashboard**. The banner clears itself once the connection returns. |
+| Unsure whether everything is configured | Run **Coffee Shop → Check setup (health check)**. |
 | Something else | Look at the **Errors** tab (newest rows at the bottom), and at **Executions** in the Apps Script editor. |

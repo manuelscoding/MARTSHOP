@@ -53,14 +53,23 @@ A web app for a school coffee shop run by staff. It uses a Google Sheet as the d
 | `Menu.gs` | Menu reading, customer bootstrap, staff menu on/off |
 | `Orders.gs` | Placing orders, staff actions, unavailable-item flow, customer responses, history, archiving |
 | `Email.gs` | All customer emails (with quota check) |
-| `Setup.gs` | `setup()`, `installTriggers()`, `showLinks()`, the Sheet's "Coffee Shop" menu |
+| `Setup.gs` | `setup()`, `checkSetup()` (health check), `installTriggers()`, `showLinks()`, the Sheet's "Coffee Shop" menu |
 | `Code.gs` | `doGet()` routing, `include()` for HTML partials |
 | `Customer.html`, `CustomerJs.html` | Customer app |
 | `Shop.html`, `ShopJs.html` | Staff dashboard |
 | `Styles.html`, `Scripts.html` | Shared CSS and browser helpers |
 | `Message.html` | Access-denied / error page |
 
-`tests/simulate.js` is an **optional** developer check. It runs the server code in Node.js against in-memory stand-ins for the Google services. Run it with `node tests/simulate.js`. It is not needed to use the app.
+### Developer checks (optional, not needed to run the app)
+
+Run `npm test` (Node.js 18+; no packages to install). It runs two checks:
+
+| Check | What it does |
+|---|---|
+| `tests/check.js` | Confirms every file parses and the manifest keeps its security settings. It is also a **security guard**: it fails if any browser-callable server function lacks an access check. |
+| `tests/simulate.js` | Runs the real server code against in-memory stand-ins for the Google services. It covers 27 groups of flows: ordering, duplicates, concurrency, unavailable items, links, students, the health check, archiving, cache failures and more. |
+
+`.github/workflows/test.yml` runs `npm test` on every push and pull request. [CHANGELOG.md](CHANGELOG.md) lists what changed in each version.
 
 ## Security summary
 
@@ -74,4 +83,15 @@ A web app for a school coffee shop run by staff. It uses a Google Sheet as the d
   - Text starting with `=`/`+`/`-`/`@` is neutralised before it reaches the Sheet.
 - **Safe display.** The browser shows all text with `textContent`, and emails escape HTML.
 - **Double-submit protection.** The button is disabled while submitting. A per-attempt `requestId` also makes a retry return the same order instead of creating a duplicate.
-- **Errors.** Unexpected errors are logged to the **Errors** sheet. Users only ever see a friendly message.
+- **Errors.** Unexpected errors are logged to the **Errors** sheet, and `ADMIN_ALERT_EMAIL` gets at most one alert email per hour. Users only ever see a friendly message.
+- **Guarded against regressions.** `tests/check.js` fails the build if a new browser-callable function forgets its access check.
+
+## Production operations
+
+| What | Detail |
+|---|---|
+| **Health check** | **Coffee Shop → Check setup** finds launch-breaking configuration mistakes before users do. |
+| **Monitoring** | Errors are logged to the **Errors** tab. Admin alert emails are rate-limited. |
+| **Dashboard reliability** | The dashboard shows an unmissable banner if it goes offline, and recovers by itself when the connection returns. It checks less often outside ordering hours. |
+| **Data hygiene** | Nightly archiving, deletion of old archived orders (optional) and old error-log rows. The Orders, Errors and Archive tabs warn anyone who edits them by hand. |
+| **Resilience** | Email failures never undo an order; staff are told to contact the customer. Cache failures fall back to reading the Sheet. Busy moments queue behind a lock instead of corrupting data. |

@@ -13,6 +13,7 @@
 (function () {
   'use strict';
   var h = App.h;
+  var BOOT = window.BOOT || {};
   var ST = { PENDING: 'Pending', AWAITING: 'Awaiting Customer Response', IN_PROGRESS: 'In Progress', COMPLETED: 'Completed', CANCELLED: 'Cancelled' };
   var HIGHLIGHT_MS = 3 * 60 * 1000;
   var LATE_MINUTES = 15;
@@ -26,6 +27,7 @@
     highlight: {},        // orderNumber -> {type:'new'|'updated', until: ms}
     polling: false,
     pendingForce: false,
+    shopOpen: true,
     pollTimer: null,
     failures: 0,
     lastSuccess: 0,
@@ -48,6 +50,7 @@
       S.boot = b;
       App.setCurrency(b.currency);
       document.getElementById('userEmail').textContent = b.user.email;
+      document.getElementById('appVersion').textContent = 'Version ' + b.appVersion;
       poll(true);
       setInterval(tick, 5000);
     }).catch(function (err) {
@@ -64,6 +67,7 @@
       S.failures = 0;
       S.lastSuccess = Date.now();
       S.serverOffset = res.serverNow - Date.now();
+      S.shopOpen = res.open !== false;
       if (!res.unchanged) {
         S.version = res.version;
         receive(res.orders);
@@ -72,6 +76,7 @@
     }).catch(function (err) {
       S.failures++;
       setConn(false, err.message);
+      showOfflineBanner(err.message);
       if (S.known === null) App.clear(ordersEl).appendChild(App.errorPanel(err.message, function () { poll(true); }));
     }).then(function () {
       S.polling = false;
@@ -83,13 +88,34 @@
     clearTimeout(S.pollTimer);
     var base = (S.boot ? S.boot.pollSeconds : 12) * 1000;
     if (document.hidden) base = Math.max(base, 30000);
+    // Outside ordering hours with nothing active, check once a minute to save quota.
+    if (!S.shopOpen && !S.orders.length) base = Math.max(base, 60000);
     var delay = S.failures ? Math.min(60000, base * Math.pow(2, Math.min(S.failures, 3))) : base;
     S.pollTimer = setTimeout(function () { poll(false); }, delay);
   }
 
   document.addEventListener('visibilitychange', function () { if (!document.hidden) poll(false); });
 
+  /**
+   * After several failed refreshes in a row, show a banner that staff can't
+   * miss: the list on screen may be out of date.
+   */
+  var OFFLINE_BANNER_AFTER = 4;
+  function showOfflineBanner(message) {
+    var box = document.getElementById('activeAlert');
+    if (S.failures < OFFLINE_BANNER_AFTER || box.firstChild) return;
+    var expired = /session|reload|sign/i.test(message || '');
+    box.appendChild(h('div', { class: 'alert error', role: 'alert' },
+      h('strong', null, 'This list may be out of date. '),
+      expired
+        ? 'Your sign-in may have expired. '
+        : 'The dashboard has not been able to reach the server for a while. Check the Wi-Fi. ',
+      h('a', { class: 'btn small', href: (BOOT.baseUrl || '') + '?page=shop', target: '_top' }, 'Reload dashboard')));
+  }
+  function hideOfflineBanner() { App.clear(document.getElementById('activeAlert')); }
+
   function setConn(ok, msg) {
+    if (ok) hideOfflineBanner();
     connEl.classList.toggle('bad', !ok);
     connEl.textContent = ok ? 'Live · updated just now' : 'Connection problem — retrying';
     connEl.title = ok ? '' : (msg || '');

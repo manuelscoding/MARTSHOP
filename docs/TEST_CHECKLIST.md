@@ -142,16 +142,27 @@ Tip: set `ORDER_OPEN_TIME` and `ORDER_CLOSE_TIME` to blank while testing, so the
 | 11.4 🤖 | Email failure (e.g. temporarily set `SEND_EMAILS` = `FALSE`, then mark an item unavailable) | The order still updates. The dashboard shows an **"Email not sent"** dialog telling staff to contact the customer. |
 | 11.5 | Errors tab | Unexpected errors appear here with the time, function, message and user. Users only see friendly messages. |
 
-## 12. Students (only if enabling)
+## 12. Operations
 
 | # | Steps | Expected |
 |---|---|---|
-| 12.1 🤖 | A numeric student account (e.g. `1111111@district.org`), before enabling | Access denied (not treated as staff). |
-| 12.1b 🤖 | Teacher accounts in each format: `firstname.lastname@`, `f.lastname@`, `flastname@` | Can order. Orders are marked `Staff`. |
-| 12.2 🤖 | Set `STUDENT_ORDERING_ENABLED` = `TRUE` | The student can order. Pickup only (default). At most `STUDENT_MAX_ITEMS_PER_ORDER` items and 1 active order. The order's `CustomerType` is `Student`. |
-| 12.3 🤖 | Add the student's email to the Staff tab, then open `?page=shop` | **Still denied.** Students can never be shop staff. |
-| 12.4 | Dashboard | Student orders show a purple **STUDENT** badge. |
-| 12.5 | `STUDENT_DELIVERY_ENABLED` = `TRUE`, `STUDENT_ALLOWED_ROOMS` = `LIBRARY` | Only LIBRARY is accepted for student delivery. |
+| 12.1 🤖 | **Coffee Shop → Check setup** on a fresh install | Warnings for a blank `WEB_APP_URL` / `ADMIN_ALERT_EMAIL` and missing triggers. No ❌ once `ALLOWED_DOMAINS` is correct. |
+| 12.2 🤖 | Put a bad value in `ORDER_CLOSE_TIME` (e.g. `2:30pm`) and `ORDER_DAYS` (e.g. `Funday`), then run the check | Both are reported as ❌ problems in plain language. |
+| 12.3 🤖 | Set `ADMIN_ALERT_EMAIL`, then cause an unexpected error (e.g. temporarily rename the Menu tab and load the customer page) | Exactly **one** alert email arrives, even if the error repeats within the hour. Rename the tab back. |
+| 12.4 | Disconnect the counter tablet's Wi-Fi for about a minute | A red "This list may be out of date" banner with a **Reload dashboard** button. It disappears on its own when Wi-Fi returns. |
+| 12.5 | Try to type in the **Orders** tab | Google Sheets shows a warning that the tab is managed by the app. |
+| 12.6 🤖 | **Coffee Shop → Archive old orders now** | Old closed orders move to Archive, and error rows older than `ERROR_LOG_RETENTION_DAYS` are removed. |
+
+## 13. Students (only if enabling)
+
+| # | Steps | Expected |
+|---|---|---|
+| 13.1 🤖 | A numeric student account (e.g. `1111111@district.org`), before enabling | Access denied (not treated as staff). |
+| 13.1b 🤖 | Teacher accounts in each format: `firstname.lastname@`, `f.lastname@`, `flastname@` | Can order. Orders are marked `Staff`. |
+| 13.2 🤖 | Set `STUDENT_ORDERING_ENABLED` = `TRUE` | The student can order. Pickup only (default). At most `STUDENT_MAX_ITEMS_PER_ORDER` items and 1 active order. The order's `CustomerType` is `Student`. |
+| 13.3 🤖 | Add the student's email to the Staff tab, then open `?page=shop` | **Still denied.** Students can never be shop staff. |
+| 13.4 | Dashboard | Student orders show a purple **STUDENT** badge. |
+| 13.5 | `STUDENT_DELIVERY_ENABLED` = `TRUE`, `STUDENT_ALLOWED_ROOMS` = `LIBRARY` | Only LIBRARY is accepted for student delivery. |
 
 ---
 
