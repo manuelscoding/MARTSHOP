@@ -152,6 +152,7 @@ Tip: set `ORDER_OPEN_TIME` and `ORDER_CLOSE_TIME` to blank while testing, so the
 | 12.3 🤖 | Set `ADMIN_ALERT_EMAIL`, then cause an unexpected error (e.g. temporarily rename the Menu tab and load the customer page) | Exactly **one** alert email arrives, even if the error repeats within the hour. Rename the tab back. |
 | 12.4 | Disconnect the counter tablet's Wi-Fi for about a minute | A red "This list may be out of date" banner with a **Reload dashboard** button. It disappears on its own when Wi-Fi returns. |
 | 12.5 | Try to type in the **Orders** tab | Google Sheets shows a warning that the tab is managed by the app. |
+| 12.7 🤖 | Look at the browser tabs for the ordering page and the dashboard | ☕ on the ordering page, 📋 on the dashboard. A wrong `FAVICON_URL` shows no icon but the page still works, and **Check setup** warns about it. |
 | 12.6 🤖 | **Coffee Shop → Archive old orders now** | Old closed orders move to Archive, and error rows older than `ERROR_LOG_RETENTION_DAYS` are removed. |
 
 ## 13. Students (only if enabling)

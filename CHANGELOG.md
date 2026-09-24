@@ -2,6 +2,12 @@
 
 The version number also appears at the bottom of the shop dashboard and in the health check.
 
+## 1.2.0
+
+- **Browser-tab icons:** ☕ for the ordering page and 📋 for the shop dashboard, so staff can tell the tabs apart. Both come from Google's emoji library.
+- **Custom icons:** new settings `FAVICON_URL` and `SHOP_FAVICON_URL` let you use your own icon (e.g. the school logo). They're added to existing Settings tabs by **Run setup**.
+- **Safe with bad links:** an invalid or broken icon link never stops a page from loading, and **Check setup** warns about it.
+
 ## 1.1.1
 
 - **Security fix:** a Staff-tab row with a **blank or unrecognised Role** used to get dashboard access. Now only `Admin` or `Staff` do (ignoring case and spaces). Everything else gets no access: the dashboard page, the "Shop dashboard" link and all 11 staff functions.

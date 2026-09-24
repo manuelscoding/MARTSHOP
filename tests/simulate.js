@@ -115,7 +115,9 @@ const g = {
     getProjectTriggers: () => g.__triggers,
   },
   HtmlService: {
-    createTemplateFromFile: f => { const t = { evaluate: () => ({ file: f, t, setTitle() { return this; }, addMetaTag() { return this; } }) }; return t; },
+    createTemplateFromFile: f => { const t = { evaluate: () => ({ file: f, t, favicon: null,
+      setTitle() { return this; }, addMetaTag() { return this; },
+      setFaviconUrl(u) { if (g.__faviconThrows) throw new Error('Invalid argument: ' + u); this.favicon = u; return this; } }) }; return t; },
     createHtmlOutputFromFile: () => ({ getContent: () => '' })
   },
   Utilities: {
@@ -686,6 +688,49 @@ test('dashboard access: ONLY Staff-tab rows with Role Admin or Staff', () => {
   cacheMap.delete('staff_v1');
   as('role.staff@school.org');
   assert.strictEqual(g.doGet({ parameter: { page: 'shop' } }).file, 'Message');
+});
+
+test('favicons: coffee cup for customers, clipboard for the dashboard, never breaks a page', () => {
+  const CUP = 'https://fonts.gstatic.com/s/e/notoemoji/latest/2615/512.png';
+  const CLIP = 'https://fonts.gstatic.com/s/e/notoemoji/latest/1f4cb/512.png';
+  as(TEACHER);
+  assert.strictEqual(g.doGet({ parameter: {} }).favicon, CUP);
+  assert.strictEqual(g.doGet({ parameter: { page: 'shop' } }).file, 'Message');
+  assert.strictEqual(g.doGet({ parameter: { page: 'shop' } }).favicon, CUP);   // access-denied page
+  as(STAFF);
+  assert.strictEqual(g.doGet({ parameter: { page: 'shop' } }).favicon, CLIP);
+  // Custom icon, shop falls back to it when SHOP_FAVICON_URL is blank
+  as(ownerEmail);
+  setSetting('FAVICON_URL', 'https://example.org/spartans.png');
+  setSetting('SHOP_FAVICON_URL', '');
+  as(STAFF);
+  assert.strictEqual(g.doGet({ parameter: { page: 'shop' } }).favicon, 'https://example.org/spartans.png');
+  // Invalid values are ignored (no favicon call) and flagged by the health check
+  as(ownerEmail);
+  setSetting('FAVICON_URL', 'http://insecure.example/x.png');
+  setSetting('SHOP_FAVICON_URL', 'javascript:alert(1)');
+  as(STAFF);
+  const page = g.doGet({ parameter: { page: 'shop' } });
+  assert.strictEqual(page.file, 'Shop');
+  assert.strictEqual(page.favicon, null);
+  as(ownerEmail);
+  const r = g.checkSetup();
+  assert.ok(r.warnings.some(w => /FAVICON_URL must be a link starting with https/.test(w)));
+  assert.ok(r.warnings.some(w => /SHOP_FAVICON_URL must be a link/.test(w)));
+  // If Google rejects the icon, the page still loads
+  setSetting('FAVICON_URL', CUP);
+  setSetting('SHOP_FAVICON_URL', CLIP);
+  g.__faviconThrows = true;
+  as(TEACHER);
+  const p2 = g.doGet({ parameter: {} });
+  assert.strictEqual(p2.file, 'Customer');
+  g.__faviconThrows = false;
+  // setup() adds the new settings rows to an existing Settings tab without touching others
+  as(ownerEmail);
+  sheets.Settings.data = sheets.Settings.data.filter(row => row[0] !== 'FAVICON_URL' && row[0] !== 'SHOP_FAVICON_URL');
+  g.setup();
+  assert.strictEqual(sheets.Settings.data.filter(row => row[0] === 'FAVICON_URL').length, 1);
+  assert.strictEqual(sheets.Settings.data.find(row => row[0] === 'SHOP_FAVICON_URL')[1], CLIP);
 });
 
 test('Orders sheet grows past its row limit without errors', () => {

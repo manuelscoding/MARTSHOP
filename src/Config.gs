@@ -11,7 +11,7 @@
  */
 
 var CONFIG = Object.freeze({
-  APP_VERSION: '1.1.1',
+  APP_VERSION: '1.2.0',
 
   SHEETS: Object.freeze({
     MENU: 'Menu',
@@ -81,6 +81,8 @@ var DEFAULT_SETTINGS = [
   // --- General ---
   ['SHOP_NAME', 'Staff Coffee Shop', 'Name shown on the app and in emails.'],
   ['CURRENCY_SYMBOL', '$', 'Currency symbol shown before prices.'],
+  ['FAVICON_URL', 'https://fonts.gstatic.com/s/e/notoemoji/latest/2615/512.png', 'Browser-tab icon for the ordering page: an https link to a PNG/ICO image. Default: a coffee cup. Blank = Google\'s default icon.'],
+  ['SHOP_FAVICON_URL', 'https://fonts.gstatic.com/s/e/notoemoji/latest/1f4cb/512.png', 'Browser-tab icon for the shop dashboard, so staff can tell the tabs apart. Default: a clipboard. Blank = same as FAVICON_URL.'],
 
   // --- Access control ---
   ['ALLOWED_DOMAINS', 'yourschool.org', 'Comma-separated school email domains (e.g. district.org). Accounts here are treated as teachers/staff UNLESS they match STUDENT_EMAIL_PATTERN. Shop staff must be teachers/staff on one of these domains.'],

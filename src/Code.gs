@@ -26,7 +26,7 @@ function doGet(e) {
         return renderMessage_('Access denied',
           'The shop dashboard is only for coffee shop staff. You are signed in as ' + ctx.email + '.', true);
       }
-      return renderTemplate_('Shop', s.SHOP_NAME + ' — Orders', { baseUrl: webAppUrl_() });
+      return renderTemplate_('Shop', s.SHOP_NAME + ' — Orders', { baseUrl: webAppUrl_() }, s.SHOP_FAVICON_URL || s.FAVICON_URL);
     }
 
     if (!ctx.canOrder) {
@@ -45,7 +45,7 @@ function doGet(e) {
       }
       boot = { mode: choice === 'revise' ? 'revise' : 'respond', order: Number(order), token: token, baseUrl: webAppUrl_() };
     }
-    return renderTemplate_('Customer', s.SHOP_NAME, boot);
+    return renderTemplate_('Customer', s.SHOP_NAME, boot, s.FAVICON_URL);
   } catch (err) {
     logError_('doGet', err);
     return renderMessage_('Something went wrong',
@@ -53,13 +53,35 @@ function doGet(e) {
   }
 }
 
-function renderTemplate_(file, title, boot) {
+function renderTemplate_(file, title, boot, faviconUrl) {
   var t = HtmlService.createTemplateFromFile(file);
   t.bootJson = safeJsonForHtml_(boot);
   t.title = title;
-  return t.evaluate()
+  var out = t.evaluate()
     .setTitle(title)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+  return applyFavicon_(out, faviconUrl);
+}
+
+/** True for an https:// link that can be used as a favicon. */
+function isValidFaviconUrl_(url) {
+  return /^https:\/\/[^\s"'<>]+$/i.test(String(url || '').trim());
+}
+
+/**
+ * Sets the browser-tab icon. Apps Script only supports this server-side
+ * (a <link rel="icon"> in the HTML would not reach the outer page). A bad or
+ * blank URL just leaves Google's default icon; it never breaks the page.
+ */
+function applyFavicon_(output, url) {
+  url = String(url || '').trim();
+  if (!isValidFaviconUrl_(url)) return output;
+  try {
+    output.setFaviconUrl(url);
+  } catch (e) {
+    console.warn('Favicon not applied (' + url + '): ' + e);
+  }
+  return output;
 }
 
 /** A simple full-page message (access denied, errors). Text is escaped by the template. */
@@ -69,10 +91,16 @@ function renderMessage_(heading, message, showCustomerLink) {
   t.message = message;
   t.homeUrl = showCustomerLink ? webAppUrl_() : '';
   var title = heading;
-  try { title = getSettings_().SHOP_NAME + ' — ' + heading; } catch (e) { /* settings unreadable */ }
-  return t.evaluate()
+  var favicon = '';
+  try {
+    var s = getSettings_();
+    title = s.SHOP_NAME + ' — ' + heading;
+    favicon = s.FAVICON_URL;
+  } catch (e) { /* settings unreadable */ }
+  var out = t.evaluate()
     .setTitle(title)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+  return applyFavicon_(out, favicon);
 }
 
 /**

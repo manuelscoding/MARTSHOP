@@ -63,6 +63,7 @@ Allow about 20 minutes. You need a Google Workspace account on your school domai
    - `STUDENT_EMAIL_PATTERN`: leave as `^[0-9]{3,9}`, so numeric accounts like `1111111@district.org` are treated as students. They are refused until `STUDENT_ORDERING_ENABLED` is `TRUE`.
    - `ORDER_DAYS`, `ORDER_OPEN_TIME`, `ORDER_CLOSE_TIME`: blank means no limit
    - `REPLY_TO_EMAIL` (optional)
+   - `FAVICON_URL` / `SHOP_FAVICON_URL`: the browser-tab icons. They default to ☕ and 📋; replace them with an `https://` link to your school logo if you like.
    - `ADMIN_ALERT_EMAIL`: the person (or IT inbox) to email if the app hits an unexpected error. At most one alert per hour. **Recommended.**
    - While testing, set `SEND_EMAILS` to `FALSE` if you don't want real emails to go out.
 2. **Menu** tab. It already holds the shop's menu (Drinks and Snacks, with prices, icons and tags). Check the prices, and rename **Seasonal Treat** for the current season if you like. Each row has a short unique `ItemID`, `Name`, `Price`, `Available` checkbox, `Category`, `SortOrder`, and optional `Icon` (an emoji) and `Tag` (e.g. `Hot`).

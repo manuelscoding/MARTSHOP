@@ -280,6 +280,9 @@ function checkSetup() {
   });
   if (!s.ORDERING_ENABLED) warnings.push('ORDERING_ENABLED is FALSE: customers cannot order right now.');
   if (s.REPLY_TO_EMAIL && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s.REPLY_TO_EMAIL)) warnings.push('Settings > REPLY_TO_EMAIL is not a valid email and is being ignored.');
+  ['FAVICON_URL', 'SHOP_FAVICON_URL'].forEach(function (k) {
+    if (s[k] && !isValidFaviconUrl_(s[k])) warnings.push('Settings > ' + k + ' must be a link starting with https:// to an image. It is being ignored.');
+  });
   if (!s.ADMIN_ALERT_EMAIL) warnings.push('Settings > ADMIN_ALERT_EMAIL is blank. Set it so someone is emailed if the app hits an error.');
   info.push('Hours: ' + describeHours_(getRules_({ customerType: CONFIG.CUSTOMER_TYPES.STAFF })) + ' (script time zone ' + s.TIMEZONE + ').');
 

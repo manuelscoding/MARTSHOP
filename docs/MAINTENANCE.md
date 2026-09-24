@@ -50,6 +50,18 @@ Things you might want to change live in **three places**. Always use the first o
 - To **add a new setting**, add a line to `DEFAULT_SETTINGS` in `Config.gs`: `['MY_KEY', defaultValue, 'Description'],`. Then run **Coffee Shop → Run setup** to add the row. Read it in code as `getSettings_().MY_KEY`.
 - Don't change `CONFIG.STATUS` names. Existing orders store those exact words.
 
+### Browser-tab icons (favicons)
+
+- **Defaults.** The ordering page shows a ☕ coffee cup in the browser tab. The shop dashboard shows a 📋 clipboard, so staff can tell the two tabs apart. Both images come from Google's own emoji library.
+- **Where it lives.** Settings `FAVICON_URL` (ordering page and access-denied pages) and `SHOP_FAVICON_URL` (dashboard). Code: `Code.gs` → `applyFavicon_()`.
+- **To use your own icon (e.g. the school logo):**
+  1. Put a square PNG, at least 64 × 64 pixels, somewhere public on the web. The school website is ideal; Google Drive links usually don't work as icons.
+  2. Paste its link (it must start with `https://`) into `FAVICON_URL`, and/or `SHOP_FAVICON_URL`.
+  3. **Clear settings cache**, then reload the page. Browsers sometimes keep the old icon for a while.
+- **Blank values.** If `SHOP_FAVICON_URL` is blank, the dashboard uses `FAVICON_URL`. If both are blank, Google's default Apps Script icon is shown.
+- **Mistakes are safe.** A wrong link can never stop the app from loading; the browser simply shows no icon. **Check setup** warns about links that don't start with `https://`.
+- Apps Script only allows the icon to be set this way, on the server. Adding a `<link rel="icon">` tag to the HTML files has no effect.
+
 ## 2. Menu
 
 **What it does.** The list of items and prices customers see. Prices are **only** ever taken from here, so a customer can't change a price in their browser.
@@ -416,6 +428,7 @@ Order records (name, school email, room, what they ordered and when) about ident
 | See what went wrong | **Errors** tab, and Apps Script → **Executions** |
 | Check the whole setup is correct | **Coffee Shop → Check setup (health check)** |
 | Get emailed when something breaks | Settings → `ADMIN_ALERT_EMAIL` |
+| Change the browser-tab icon | Settings → `FAVICON_URL` / `SHOP_FAVICON_URL` (an `https://` link to a PNG) |
 | Close for a holiday | Settings → `ORDERING_ENABLED` = `FALSE` (back to `TRUE` after) |
 | Find last week's order | Dashboard → **History** → pick the date |
 | Fix a mistakenly completed order | Dashboard → **History** → open it → **Reopen order** |
