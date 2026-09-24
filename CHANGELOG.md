@@ -2,6 +2,13 @@
 
 The version number also appears at the bottom of the shop dashboard and in the health check.
 
+## 1.1.1
+
+- **Security fix:** a Staff-tab row with a **blank or unrecognised Role** used to get dashboard access. Now only `Admin` or `Staff` do (ignoring case and spaces). Everything else gets no access: the dashboard page, the "Shop dashboard" link and all 11 staff functions.
+- **Staff tab Role dropdown:** it now rejects other values.
+- **Health check:** it names Staff rows whose Role gives no access.
+- **Tests:** a new test checks every Role variant against the page, the link and each staff function.
+
 ## 1.1.0
 
 **Production hardening**

@@ -229,7 +229,10 @@ Customers can filter by category with the chips at the top (All / Drinks / Snack
 **What it does.**
 - **Who is a student?** On `ALLOWED_DOMAINS` (e.g. `district.org`), any account whose part before the @ matches `STUDENT_EMAIL_PATTERN` is a **student**. The default pattern is "starts with 3–9 digits", e.g. `1111111@district.org`. Every other account on that domain is **teacher/staff**, e.g. `firstname.lastname@`, `f.lastname@`, `flastname@`.
 - **Customer side:** teachers and staff can order. Students can order only when `STUDENT_ORDERING_ENABLED` is `TRUE`; until then they see "Access denied".
-- **Dashboard:** open only to teacher/staff accounts listed in the **Staff** tab. A student account is refused even if it is listed.
+- **Dashboard:** open only to teacher/staff accounts listed in the **Staff** tab with a **Role of `Admin` or `Staff`**. Capital letters and extra spaces don't matter.
+  - A row with a **blank** Role, or any other word (e.g. `Teacher`, `Customer`, a typo like `Staf`), gives **no** access. **Coffee Shop → Check setup** names any such rows.
+  - A student account is refused even if it is listed as `Admin`.
+  - Only people with dashboard access see the **Shop dashboard** link on the ordering page. Everyone else is also refused by the server if they try the dashboard address or its functions directly.
 - These checks run on the server in **every** function. The deployment setting "Anyone within yourschool.org" is an extra outer fence.
 
 **Where it lives.**
@@ -238,7 +241,10 @@ Customers can filter by category with the chips at the top (All / Drinks / Snack
 - Admin-only functions: `Util.gs` → `requireOwner_()`, `requireOwnerOrTrigger_()`.
 
 **How to change it safely.**
-- **Add or remove shop staff:** edit the **Staff** tab, then **Clear settings cache**. `Role` is `Admin` or `Staff`. Both can use the dashboard today; `Admin` is there for future admin-only features (see `ctx.staffRole`).
+- **Add or remove shop staff:** edit the **Staff** tab, then **Clear settings cache** (otherwise changes apply within 60 seconds).
+  - `Role` must be `Admin` or `Staff`; the column has a dropdown.
+  - Both roles can use the dashboard today. `Admin` is there for future admin-only features (see `ctx.staffRole`).
+  - **To remove someone's access, delete their row or clear their Role.**
 - **Add a domain:** add it to `ALLOWED_DOMAINS`, separated by commas (e.g. `district.org, otherschool.org`). The student pattern applies to every domain in this list.
 - **Never** remove a `requireCustomer_()` / `requireStaff_()` line from a function that has one.
 - If you write a **new** browser-callable function, wrap it the same way: `return api_('name', function () { var ctx = requireStaff_(); ... });`.

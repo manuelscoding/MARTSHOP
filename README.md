@@ -67,7 +67,7 @@ Run `npm test` (Node.js 18+; no packages to install). It runs two checks:
 | Check | What it does |
 |---|---|
 | `tests/check.js` | Confirms every file parses and the manifest keeps its security settings. It is also a **security guard**: it fails if any browser-callable server function lacks an access check. |
-| `tests/simulate.js` | Runs the real server code against in-memory stand-ins for the Google services. It covers 27 groups of flows: ordering, duplicates, concurrency, unavailable items, links, students, the health check, archiving, cache failures and more. |
+| `tests/simulate.js` | Runs the real server code against in-memory stand-ins for the Google services. It covers 28 groups of flows: ordering, duplicates, concurrency, unavailable items, links, students, the health check, archiving, cache failures and more. |
 
 `.github/workflows/test.yml` runs `npm test` on every push and pull request. [CHANGELOG.md](CHANGELOG.md) lists what changed in each version.
 

@@ -9,7 +9,7 @@
  *   Student     domain in ALLOWED_DOMAINS and the part before the @   if STUDENT_ORDERING_ENABLED   NEVER
  *               matches STUDENT_EMAIL_PATTERN (e.g. 1111111@...),
  *               OR domain in STUDENT_DOMAINS
- *   Staff       any other account on ALLOWED_DOMAINS                  yes                           only if listed in Staff sheet
+ *   Staff       any other account on ALLOWED_DOMAINS                  yes                           only if in the Staff sheet with Role Admin or Staff
  *   Anyone else —                                                     no                            no
  */
 
@@ -97,7 +97,23 @@ function requireStaff_() {
   return ctx;
 }
 
-/** Map of lowercase email -> {name, role} from the Staff sheet (cached). */
+/**
+ * Turns a Role cell into 'Admin' or 'Staff' (ignoring case and spaces), or ''
+ * if it is blank or anything else.
+ */
+function normalizeRole_(value) {
+  var v = String(value === null || value === undefined ? '' : value).trim().toLowerCase();
+  for (var i = 0; i < CONFIG.STAFF_ROLES.length; i++) {
+    if (CONFIG.STAFF_ROLES[i].toLowerCase() === v) return CONFIG.STAFF_ROLES[i];
+  }
+  return '';
+}
+
+/**
+ * Map of lowercase email -> {name, role} for Staff-sheet rows whose Role is
+ * exactly Admin or Staff. Rows with a blank or any other Role grant NO
+ * dashboard access (checkSetup() reports them). Cached.
+ */
 function getStaffMap_() {
   if (staffMemo_) return staffMemo_;
   var cached = cacheGet_('staff_v1');
@@ -110,10 +126,11 @@ function getStaffMap_() {
   t.rows.forEach(function (r) {
     var email = String(r[t.idx.Email] || '').trim().toLowerCase();
     if (!email || email.indexOf('@') < 1) return;
-    var role = t.idx.hasOwnProperty('Role') ? String(r[t.idx.Role] || '').trim() : '';
+    var role = t.idx.hasOwnProperty('Role') ? normalizeRole_(r[t.idx.Role]) : '';
+    if (!role) return;                     // blank/unknown role: no dashboard access
     map[email] = {
       name: t.idx.hasOwnProperty('Name') ? String(r[t.idx.Name] || '').trim() : '',
-      role: CONFIG.STAFF_ROLES.indexOf(role) !== -1 ? role : 'Staff'
+      role: role
     };
   });
   staffMemo_ = map;

@@ -36,6 +36,7 @@ Tip: set `ORDER_OPEN_TIME` and `ORDER_CLOSE_TIME` to blank while testing, so the
 | 1.5 🤖 | Teacher A runs `google.script.run.setup()` or `archiveOldOrders({triggerUid:'x'})` in the console | Refused: "Only the owner…" |
 | 1.6 | Barista opens `?page=shop` | Dashboard loads. The Barista's email is shown top right. |
 | 1.7 | Remove the Barista from the Staff tab, then **Clear settings cache**, then reload | Access denied. Put them back afterwards. |
+| 1.7b 🤖 | In the Staff tab, set a row's Role to blank, then `Teacher`, then `Staf`. Clear the cache each time and open `?page=shop` as that person | Access denied every time. The **Shop dashboard** link is hidden on their ordering page. **Check setup** names the row. `Admin`, `Staff`, `staff` and `ADMIN` all work. |
 | 1.8 🤖 | Teacher A (console) runs `submitOrder({items:[{id:'ICEDCOFFEE',qty:1,price:0.01}],name:'A',delivery:false,payment:'Cash'})` | The order is priced at the **Menu** price, not $0.01. |
 
 ## 2. Duplicate submissions

@@ -66,7 +66,7 @@ Allow about 20 minutes. You need a Google Workspace account on your school domai
    - `ADMIN_ALERT_EMAIL`: the person (or IT inbox) to email if the app hits an unexpected error. At most one alert per hour. **Recommended.**
    - While testing, set `SEND_EMAILS` to `FALSE` if you don't want real emails to go out.
 2. **Menu** tab. It already holds the shop's menu (Drinks and Snacks, with prices, icons and tags). Check the prices, and rename **Seasonal Treat** for the current season if you like. Each row has a short unique `ItemID`, `Name`, `Price`, `Available` checkbox, `Category`, `SortOrder`, and optional `Icon` (an emoji) and `Tag` (e.g. `Hot`).
-3. **Staff** tab. Add one row per shop staff member: `Email`, `Name`, `Role` (`Admin` or `Staff`).
+3. **Staff** tab. Add one row per shop staff member: `Email`, `Name`, `Role`. **Role must be `Admin` or `Staff`.** A blank or different Role gives no dashboard access.
 4. Choose **Coffee Shop → Clear settings cache** so the changes apply immediately. Otherwise they apply within 60 seconds.
 
 ## Step 5: Deploy the web app
@@ -170,7 +170,7 @@ Google publishes the current numbers at <https://developers.google.com/apps-scri
 |---|---|
 | "Sheet 'Orders' is missing" / "Run setup()" | Run `setup()` again. It is safe and never deletes data. |
 | Everyone gets "Access denied" | Check `ALLOWED_DOMAINS` in Settings (no `@`, just `yourschool.org`), then **Clear settings cache**. |
-| A staff member can't open the dashboard | Their exact email must be in the **Staff** tab and on an allowed domain. Then clear the cache. |
+| A staff member can't open the dashboard | Their exact email must be in the **Staff** tab, with **Role `Admin` or `Staff`**, on an allowed domain, and must not look like a student account. Then clear the cache. **Check setup** names rows with a missing or wrong Role. |
 | "We could not confirm your school Google account" | The visitor isn't signed in, or is signed in with an account outside your organization. Have them sign out of other accounts or use a separate browser profile. |
 | Email links point at `/dev` or are missing | Set `WEB_APP_URL` in Settings to the `/exec` URL. |
 | "Your sign-in session may have expired, or you are signed in to more than one Google account" | This is a known Google limitation. The app can fail when a browser is signed in to several Google accounts at once (e.g. school + personal). Use a Chrome profile or window signed in **only** to the school account. |

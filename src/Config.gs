@@ -11,7 +11,7 @@
  */
 
 var CONFIG = Object.freeze({
-  APP_VERSION: '1.1.0',
+  APP_VERSION: '1.1.1',
 
   SHEETS: Object.freeze({
     MENU: 'Menu',

@@ -91,7 +91,7 @@ const g = {
     getActiveSpreadsheet: () => ss, openById: () => ss, flush() {},
     getUi() { throw new Error('no ui'); },
     ProtectionType: { SHEET: 'SHEET' },
-    newDataValidation() { const b = { requireCheckbox: () => b, requireValueInList: () => b, build: () => ({}) }; return b; }
+    newDataValidation() { const b = { requireCheckbox: () => b, requireValueInList: () => b, setAllowInvalid: () => b, setHelpText: () => b, build: () => ({}) }; return b; }
   },
   Session: {
     getActiveUser: () => ({ getEmail: () => activeEmail }),
@@ -630,6 +630,62 @@ test('a failing cache service never breaks ordering or the dashboard', () => {
   } finally {
     g.CacheService.getScriptCache = real;
   }
+});
+
+test('dashboard access: ONLY Staff-tab rows with Role Admin or Staff', () => {
+  // Every server function that belongs to the shop dashboard.
+  const STAFF_FUNCTIONS = {
+    getShopBootstrap: [], getActiveOrders: [''], startOrder: [999], completeOrder: [999], cancelOrder: [999, 'x'],
+    reopenOrder: [999], markItemsUnavailable: [999, ['LATTE'], false], staffContinueWithout: [999],
+    getHistory: [{}], getMenuAdmin: [], setMenuItemAvailability: ['LATTE', true]
+  };
+  const cases = [
+    // [email, Role cell, should have access]
+    ['role.admin@school.org', 'Admin', true],
+    ['role.staff@school.org', 'Staff', true],
+    ['role.lower@school.org', ' staff ', true],       // case/spaces are forgiven
+    ['role.upper@school.org', 'ADMIN', true],
+    ['role.blank@school.org', '', false],
+    ['role.teacher@school.org', 'Teacher', false],
+    ['role.customer@school.org', 'Customer', false],
+    ['role.typo@school.org', 'Staf', false],
+    ['1234567@school.org', 'Admin', false]             // student account, even with Admin role
+  ];
+  as(ownerEmail);
+  cases.forEach(c => sheets.Staff.appendRow([c[0], 'Test', c[1]]));
+  cacheMap.delete('staff_v1');
+
+  const notListed = 'not.listed@school.org';
+  cases.concat([[notListed, null, false]]).forEach(([email, role, allowed]) => {
+    as(email);
+    const label = email + ' (Role "' + role + '")';
+    // 1. The dashboard page itself
+    assert.strictEqual(g.doGet({ parameter: { page: 'shop' } }).file, allowed ? 'Shop' : 'Message', label + ' page');
+    // 2. The "Shop dashboard" link on the ordering page
+    if (!/^\d/.test(email)) {
+      assert.strictEqual(ok(g.getCustomerBootstrap()).user.isShopStaff, allowed, label + ' link');
+    }
+    // 3. Every staff server function (a non-staff user calling it from the browser console)
+    Object.keys(STAFF_FUNCTIONS).forEach(fn => {
+      as(email);
+      const res = g[fn].apply(null, STAFF_FUNCTIONS[fn]);
+      if (allowed) assert.ok(!(res.error || '').match(/only for coffee shop staff/), label + ' ' + fn + ' should be allowed');
+      else assert.match(res.error || '', /only for coffee shop staff/, label + ' ' + fn + ' should be refused');
+    });
+  });
+  // Put the menu item back (setMenuItemAvailability was called with true only)
+  // The health check names the rows that grant no access.
+  as(ownerEmail);
+  const r = g.checkSetup();
+  ['role.blank@', 'role.teacher@', 'role.customer@', 'role.typo@'].forEach(e =>
+    assert.ok(r.warnings.some(w => w.indexOf(e) !== -1 && /NO access/.test(w)), 'health check should flag ' + e));
+  assert.ok(!r.warnings.some(w => w.indexOf('role.admin@') !== -1));
+  // Changing a role takes effect once the 60-second cache expires (or Clear settings cache).
+  const row = sheets.Staff.data.findIndex(x => x[0] === 'role.staff@school.org');
+  sheets.Staff.data[row][2] = '';
+  cacheMap.delete('staff_v1');
+  as('role.staff@school.org');
+  assert.strictEqual(g.doGet({ parameter: { page: 'shop' } }).file, 'Message');
 });
 
 test('Orders sheet grows past its row limit without errors', () => {

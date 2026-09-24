@@ -70,7 +70,8 @@ function setup() {
   if (staff.getLastRow() < 2 && owner) staff.getRange(2, 1, 1, 3).setValues([[owner, 'Shop Owner', 'Admin']]);
   var sIdx = headerIndex_(staff);
   staff.getRange(2, sIdx.Role + 1, Math.max(staff.getMaxRows() - 1, 1), 1)
-    .setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(CONFIG.STAFF_ROLES, true).build());
+    .setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(CONFIG.STAFF_ROLES, true)
+      .setAllowInvalid(false).setHelpText('Choose Admin or Staff. Only these roles can open the shop dashboard.').build());
 
   // --- Settings (add missing keys only) ---
   var settings = ensureSheet_(ss, CONFIG.SHEETS.SETTINGS, CONFIG.HEADERS.SETTINGS);
@@ -240,7 +241,16 @@ function checkSetup() {
   }
   var staff = getStaffMap_();
   var staffEmails = Object.keys(staff);
-  if (!staffEmails.length) errors.push('The Staff tab has no valid email addresses, so nobody can open the shop dashboard.');
+  if (!staffEmails.length) errors.push('The Staff tab has no rows with a valid email AND a Role of Admin or Staff, so nobody can open the shop dashboard.');
+  var st = readTable_(CONFIG.SHEETS.STAFF, ['Email']);
+  st.rows.forEach(function (r, i) {
+    var email = String(r[st.idx.Email] || '').trim();
+    if (!email) return;
+    var roleCell = st.idx.hasOwnProperty('Role') ? String(r[st.idx.Role] || '').trim() : '';
+    if (!normalizeRole_(roleCell)) {
+      warnings.push('Staff tab row ' + (i + 2) + ' (' + email + ') has Role "' + roleCell + '". Only Admin or Staff can open the dashboard, so this person has NO access.');
+    }
+  });
   staffEmails.forEach(function (email) {
     var domain = email.split('@')[1];
     if (domains.indexOf(domain) === -1) warnings.push('Staff member ' + email + ' is not on ALLOWED_DOMAINS, so they cannot open the dashboard.');
