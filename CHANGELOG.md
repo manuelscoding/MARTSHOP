@@ -2,6 +2,13 @@
 
 The version number also appears at the bottom of the shop dashboard and in the health check.
 
+## 1.4.0
+
+- **Remove on the menu:** every item in the order has a **Remove** button on its menu card. Tapping it takes the item out completely, including all its drink options.
+- **"Your order" list:** tapping the bottom bar (**View / change order**) opens a list of everything in the order. Each line has − / + and **Remove**, plus **Remove everything**.
+- **Checkout (Review) page:** each line can be changed or removed right there. Drinks with different options are separate lines, so "Hot Coffee — Honey" can be removed without touching "Hot Coffee — Sugar". Removing the last item returns to the menu.
+- **Undo:** every removal shows a message with **Undo** for 8 seconds.
+
 ## 1.3.1
 
 - **Fix:** on a Sheet set up before 1.3.0, the drink-options popup never appeared (Continue went straight to Delivery) until `setup()` was run again.

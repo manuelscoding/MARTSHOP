@@ -82,14 +82,26 @@ var App = (function () {
   }
 
   var toastTimer = null;
-  function toast(msg, type) {
+  /**
+   * Short message at the bottom of the screen. Optional action, e.g.
+   * {label: 'Undo', onClick: fn}, adds a button and keeps the message up longer.
+   */
+  function toast(msg, type, action) {
     var el = document.getElementById('toast');
     if (!el) return;
-    el.textContent = msg;
+    clear(el);
+    el.appendChild(document.createTextNode(msg));
+    if (action) {
+      el.appendChild(h('button', { type: 'button', class: 'toast-action', onclick: function () {
+        el.hidden = true;
+        clearTimeout(toastTimer);
+        action.onClick();
+      } }, action.label));
+    }
     el.className = type || '';
     el.hidden = false;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { el.hidden = true; }, type === 'error' ? 7000 : 3500);
+    toastTimer = setTimeout(function () { el.hidden = true; }, action ? 8000 : (type === 'error' ? 7000 : 3500));
   }
 
   function uuid() {

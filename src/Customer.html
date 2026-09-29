@@ -18,11 +18,14 @@
 
   <div id="cartbar" class="cartbar" hidden>
     <div class="inner">
-      <div id="cartIcons" class="cart-icons" aria-hidden="true"></div>
-      <div>
-        <div class="small muted" id="cartCount">0 items</div>
-        <div class="total" id="cartTotal" aria-live="polite">$0.00</div>
-      </div>
+      <button type="button" id="cartView" class="cart-summary-btn" aria-label="View or change your order">
+        <span id="cartIcons" class="cart-icons" aria-hidden="true"></span>
+        <span>
+          <span class="small muted" id="cartCount">0 items</span>
+          <span class="total" id="cartTotal" aria-live="polite" style="display:block">$0.00</span>
+          <span class="view">View / change order</span>
+        </span>
+      </button>
       <div class="spacer"></div>
       <button type="button" class="btn primary" id="cartContinue">Continue</button>
     </div>

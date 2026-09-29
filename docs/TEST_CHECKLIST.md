@@ -170,6 +170,17 @@ Tip: set `ORDER_OPEN_TIME` and `ORDER_CLOSE_TIME` to blank while testing, so the
 | 12b.8 🤖 | Pickup off **and** `DELIVERY_ENABLED` = `FALSE` | The customer page shows ordering closed: "Pickup is paused … please check back soon." |
 | 12b.9 🤖 | Revise an order that had drink options (after an item-unavailable email) | Each drink comes back with its options pre-selected. |
 
+## 12c. Removing items from the cart
+
+| # | Steps | Expected |
+|---|---|---|
+| 12c.1 | Add 2 × Coca Cola and 1 × Takis. Tap **Remove** on the Takis card | Takis leaves the order: its card shows **Add** again and the total drops. A "Takis removed · Undo" message appears. |
+| 12c.2 | Tap **Undo** | Takis is back and the total is restored. |
+| 12c.3 | Tap **View / change order** in the bottom bar | The **Your order** list opens. − / + change quantities, **Remove** deletes a line, **Remove everything** empties the order (with Undo). |
+| 12c.4 | Add 2 Hot Coffees (one with Sugar, one with Honey) and go to Review | Two separate lines. **Remove** on "Honey" removes only that coffee, and the total updates. + on "Sugar" adds another Sugar coffee. |
+| 12c.5 | On Review, remove every line | You return to the menu with "Your order is empty". |
+| 12c.6 | After removing items, place the order | The order saves with exactly the remaining items and the correct total. |
+
 ## 13. Students (only if enabling)
 
 | # | Steps | Expected |

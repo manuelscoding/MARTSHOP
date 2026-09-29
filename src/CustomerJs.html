@@ -95,6 +95,7 @@
     syncTopbar();
     S.step = step;
     cartbar.hidden = step !== 'menu';
+    document.body.classList.toggle('has-cartbar', step === 'menu');
     if (step === 'menu') renderMenu();
     else if (step === 'delivery') renderDelivery();
     else if (step === 'payment') renderPayment();
@@ -198,6 +199,7 @@
     card.classList.toggle('in-cart', q > 0);
     card.querySelector('.add-btn').hidden = q > 0;
     card.querySelector('.stepper').hidden = q === 0;
+    card.querySelector('.remove-btn').hidden = q === 0;
     card.querySelector('input').value = q;
     card.querySelector('.plus').disabled = q >= S.data.rules.maxQtyPerItem;
     var bubble = card.querySelector('.mcard-qty');
@@ -239,6 +241,136 @@
       go('delivery');
     }
   });
+
+  /* ---------------- removing and changing items ---------------- */
+
+  function snapshot() {
+    return { cart: JSON.parse(JSON.stringify(S.cart)), custom: JSON.parse(JSON.stringify(S.custom)) };
+  }
+
+  /** After a removal: refresh whatever screen is showing and offer Undo. */
+  function afterRemoval(message, before) {
+    refreshCartViews();
+    App.toast(message, '', { label: 'Undo', onClick: function () {
+      S.cart = before.cart;
+      S.custom = before.custom;
+      refreshCartViews();
+      App.toast('Restored', 'ok');
+    } });
+  }
+
+  /** Re-draw the parts of the page that show the cart. */
+  function refreshCartViews() {
+    if (S.step === 'menu') {
+      S.data.menu.forEach(function (it) { updateItemRow(it.id); });
+      updateCartBar();
+    } else if (S.step === 'review') {
+      if (!cartQty()) { go('menu'); App.toast('Your order is empty. Add something from the menu.'); return; }
+      renderReview();
+    }
+    if (S.refreshPanel) S.refreshPanel();
+  }
+
+  /** Removes every one of an item (all cups, whatever their options). */
+  function removeItem(id) {
+    var it = S.menuById[id];
+    if (!S.cart[id]) return;
+    var before = snapshot();
+    delete S.cart[id];
+    delete S.custom[id];
+    afterRemoval((it ? it.name : 'Item') + ' removed', before);
+  }
+
+  /** The option ids of one cart line, as a stable key. */
+  function lineKey(line) {
+    return line.options.map(function (o) { return o.id; }).sort().join(',');
+  }
+
+  /** Removes one cart line (for drinks: only the cups with exactly these options). */
+  function removeLine(line) {
+    var it = S.menuById[line.id];
+    if (!it || !it.customizable) { removeItem(line.id); return; }
+    var before = snapshot();
+    var key = lineKey(line);
+    var cups = cupsFor(line.id).filter(function (ids) { return ids.slice().sort().join(',') !== key; });
+    if (cups.length) { S.cart[line.id] = cups.length; S.custom[line.id] = cups; }
+    else { delete S.cart[line.id]; delete S.custom[line.id]; }
+    afterRemoval(line.qty + ' × ' + line.name + (line.options.length ? ' (' + line.options.map(function (o) { return o.name; }).join(', ') + ')' : '') + ' removed', before);
+  }
+
+  /** +1 / -1 on one cart line. Going to 0 counts as a removal (with Undo). */
+  function changeLine(line, delta) {
+    var it = S.menuById[line.id];
+    if (delta < 0 && line.qty <= 1) { removeLine(line); return; }
+    if (!it || !it.customizable) { setQty(line.id, (S.cart[line.id] || 0) + delta); refreshCartViews(); return; }
+    var cups = cupsFor(line.id);
+    var key = lineKey(line);
+    if (delta > 0) {
+      var rules = S.data.rules;
+      if (cups.length >= rules.maxQtyPerItem) { App.toast('Maximum ' + rules.maxQtyPerItem + ' of one item.', 'error'); return; }
+      if (cartQty() >= rules.maxItemsPerOrder) { App.toast('Orders are limited to ' + rules.maxItemsPerOrder + ' items.', 'error'); return; }
+      cups.push(line.options.map(function (o) { return o.id; }));
+    } else {
+      for (var i = cups.length - 1; i >= 0; i--) {
+        if (cups[i].slice().sort().join(',') === key) { cups.splice(i, 1); break; }
+      }
+    }
+    S.custom[line.id] = cups;
+    S.cart[line.id] = cups.length;
+    refreshCartViews();
+  }
+
+  /** One editable cart line: name, options, − qty +, price, Remove. */
+  function cartLineRow(line) {
+    var label = line.name + (line.options.length ? ' with ' + line.options.map(function (o) { return o.name; }).join(', ') : '');
+    return h('li', { class: 'cart-line' },
+      h('span', { class: 'line-icon', 'aria-hidden': 'true' }, iconFor(line)),
+      h('div', { class: 'what' }, h('strong', null, line.name),
+        line.options.length ? h('span', { class: 'line-opts' }, line.options.map(function (o) { return o.name; }).join(', ')) : null),
+      h('div', { class: 'stepper' },
+        h('button', { type: 'button', 'aria-label': 'One fewer ' + label, onclick: function () { changeLine(line, -1); } }, '−'),
+        h('span', { class: 'qty', 'aria-label': 'Quantity ' + line.qty }, String(line.qty)),
+        h('button', { type: 'button', 'aria-label': 'One more ' + label, onclick: function () { changeLine(line, 1); } }, '+')),
+      h('span', { class: 'line-price' }, App.money(App.cents(line.price) * line.qty / 100)),
+      h('button', { type: 'button', class: 'remove-btn', style: 'margin-top:0', 'aria-label': 'Remove ' + label + ' from your order',
+        onclick: function () { removeLine(line); } }, 'Remove'));
+  }
+
+  /** "Your order" panel opened from the bottom bar on the menu page. */
+  function openCartPanel() {
+    if (!cartQty()) { App.toast('Your order is empty. Tap Add on any item.'); return; }
+    var list = h('ul', { class: 'cart-lines' });
+    var totalRow = h('div', { class: 'cart-total-row' });
+    var body = h('div', null, list, totalRow,
+      h('button', { type: 'button', class: 'remove-btn', onclick: function () {
+        var before = snapshot();
+        S.cart = {};
+        S.custom = {};
+        afterRemoval('Order cleared', before);
+      } }, 'Remove everything'));
+    function draw() {
+      App.clear(list);
+      var lines = cartLines();
+      if (!lines.length) {
+        list.appendChild(h('li', { class: 'muted', style: 'padding:12px 0' }, 'Your order is empty.'));
+      }
+      lines.forEach(function (l) { list.appendChild(cartLineRow(l)); });
+      App.clear(totalRow).appendChild(h('span', null, 'Total'));
+      totalRow.appendChild(h('span', null, App.money(cartTotal())));
+    }
+    draw();
+    S.refreshPanel = draw;
+    App.modal({
+      title: 'Your order',
+      body: body,
+      buttons: [{ label: 'Keep shopping', class: 'btn', value: null }, { label: 'Continue', class: 'btn primary', value: 'go' }]
+    }).then(function (v) {
+      S.refreshPanel = null;
+      if (v === 'go') document.getElementById('cartContinue').click();
+    });
+  }
+
+  document.getElementById('cartView').addEventListener('click', openCartPanel);
 
   /* ---------------- drink options popup ---------------- */
 
@@ -438,13 +570,18 @@
       h('button', { type: 'button', class: 'plus', 'aria-label': 'Add one ' + it.name, disabled: q >= max,
         onclick: function () { setQty(it.id, (S.cart[it.id] || 0) + 1); } }, '+'));
 
+    var removeBtn = h('button', { type: 'button', class: 'remove-btn', hidden: q === 0,
+      'aria-label': 'Remove ' + it.name + ' from your order',
+      onclick: function () { removeItem(it.id); focusIn(it.id, '.add-btn'); } }, 'Remove');
+
     return h('article', { class: 'mcard' + (q ? ' in-cart' : ''), id: 'item-' + cssId(it.id) },
       it.tag ? h('span', { class: 'mcard-tag tag-' + slug(it.tag) }, it.tag) : null,
       h('span', { class: 'mcard-qty', 'aria-hidden': 'true', hidden: q === 0 }, String(q)),
       h('div', { class: 'mcard-icon', 'aria-hidden': 'true' }, it.icon || '•'),
       h('h4', { class: 'mcard-name' }, it.name),
       h('div', { class: 'mcard-price' }, priceTag(it.price)),
-      h('div', { class: 'mcard-actions' }, addBtn, stepper));
+      h('div', { class: 'mcard-actions' }, addBtn, stepper),
+      removeBtn);
   }
 
   function focusIn(id, selector) {
@@ -621,8 +758,9 @@
       submit(submitBtn, errBox);
     } },
       h('h2', null, S.mode === 'revise' ? 'Review your updated order' : 'Review your order'),
-      summaryTable(lines, cartTotal()),
-      h('div', { class: 'row' }, editBtn('Change items', 'menu'),
+      h('ul', { class: 'cart-lines', 'aria-label': 'Items in your order' }, lines.map(cartLineRow)),
+      h('div', { class: 'cart-total-row' }, h('span', null, 'Total'), h('span', null, App.money(cartTotal()))),
+      h('div', { class: 'row' }, editBtn('Add more items', 'menu'),
         customizableInCart().length
           ? h('button', { type: 'button', class: 'btn linklike small', onclick: function () {
               openCustomizer().then(function (done) { if (done) renderReview(); });

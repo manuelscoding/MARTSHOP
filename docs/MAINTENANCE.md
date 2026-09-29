@@ -139,6 +139,12 @@ Customers can filter by category with the chips at the top (All / Drinks / Snack
 - **Wording on screen:** edit the text in quotes in `CustomerJs.html`, e.g. `'What would you like?'`.
 - **Colors and sizes:** edit the variables at the top of `Styles.html` (`--brand`, etc.). Keep text dark on light backgrounds, or light on dark, so it stays readable.
 - **Duplicate protection:** the Submit button is disabled while sending, and each attempt carries a `requestId`. **Don't remove either.**
+- **Removing items:**
+  - **Menu page:** customers tap **Remove** on a menu card, or open **View / change order** from the bottom bar.
+  - **Review page:** each line has − / + and **Remove**.
+  - **Undo:** every removal offers Undo.
+  - **Where it lives:** `CustomerJs.html` → `removeItem()`, `removeLine()`, `changeLine()`, `openCartPanel()`, `cartLineRow()`.
+  - Nothing is sent to the server until the order is placed, so removing items can't affect other orders.
 
 ## 4. Delivery
 
