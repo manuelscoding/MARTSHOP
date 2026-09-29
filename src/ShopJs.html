@@ -223,6 +223,7 @@
       list.push(btn('Mark more unavailable', 'warn', 'unavail', function () { unavailableDialog(o); }));
     }
     list.push(btn('Cancel', 'danger', 'cancel', function () { cancelDialog(o); }));
+    list.push(btn('🖨 Print receipt', '', 'print', function () { printReceipt(o); }));
     return h('div', { class: 'order-actions' }, list);
   }
 
@@ -466,7 +467,68 @@
                 }).catch(function (err) { App.toast(err.message, 'error'); });
               });
             } }, 'Reopen order')
-          : null));
+          : null,
+        ' ',
+        h('button', { type: 'button', class: 'btn small', onclick: function () { printReceipt(o); } }, '🖨 Print receipt')));
+  }
+
+  /* ---------------- paper receipts ---------------- */
+
+  /**
+   * Prints a receipt-sized slip for one order. The receipt is built as plain
+   * elements (text only) in #printArea; print CSS hides everything else.
+   * Works on 80 mm receipt printers and normal printers alike.
+   */
+  function printReceipt(o) {
+    var area = document.getElementById('printArea');
+    var lines = o.items.filter(function (l) { return !l.unavailable; });
+    var removed = o.items.filter(function (l) { return l.unavailable; });
+    function row(left, right, cls) {
+      return h('div', { class: 'r-row' + (cls ? ' ' + cls : '') }, h('span', null, left), h('span', null, right));
+    }
+    var cancelled = o.status === ST.CANCELLED;
+    var total = cancelled ? 0 : lines.reduce(function (c, l) { return c + App.cents(l.lineTotal); }, 0) / 100;
+    App.clear(area).appendChild(h('div', { class: 'receipt' },
+      h('h1', null, S.boot ? S.boot.shopName : 'Coffee Shop'),
+      h('div', { class: 'r-center' }, 'Receipt'),
+      h('div', { class: 'r-big' }, 'Order #' + o.orderNumber),
+      h('div', { class: 'r-center' }, App.dateTime(o.timestamp)),
+      h('div', { class: 'r-rule' }),
+      row('Name:', o.customerName),
+      row(o.delivery ? 'Delivery:' : 'Pickup', o.delivery ? 'Room ' + o.room : ''),
+      row('Payment:', o.payment),
+      h('div', { class: 'r-rule' }),
+      lines.map(function (l) {
+        return h('div', null,
+          row(l.qty + ' x ' + l.name, App.money(l.lineTotal)),
+          (l.options && l.options.length) ? h('div', { class: 'r-opts' }, l.options.map(function (op) { return op.name; }).join(', ')) : null);
+      }),
+      removed.length ? h('div', { class: 'r-opts' }, 'Not available (no charge): ' + removed.map(function (l) { return l.name; }).join(', ')) : null,
+      h('div', { class: 'r-rule' }),
+      row('TOTAL', App.money(total), 'r-total'),
+      cancelled ? h('div', { class: 'r-note' }, 'ORDER CANCELLED — NO CHARGE') : null,
+      o.status === ST.AWAITING ? h('div', { class: 'r-note' }, 'Waiting on customer — total may change') : null,
+      h('div', { class: 'r-rule' }),
+      S.boot && S.boot.receiptFooter ? h('div', { class: 'r-center' }, S.boot.receiptFooter) : null,
+      h('div', { class: 'r-center', style: 'margin-top:4px;font-size:10px' }, 'Printed ' + App.dateTime(Date.now()))));
+
+    document.body.classList.add('printing');
+    var done = false;
+    function cleanup() {
+      if (done) return;
+      done = true;
+      document.body.classList.remove('printing');
+      window.removeEventListener('afterprint', cleanup);
+    }
+    window.addEventListener('afterprint', cleanup);
+    // The "printing" class only changes what is PRINTED, never the screen, so
+    // it is safe to leave it on until the browser says printing is finished
+    // (iPad Safari opens the print sheet without pausing the page).
+    try {
+      window.print();
+    } catch (e) {
+      App.toast('Could not open the print dialog. Press Ctrl+P (Cmd+P on a Mac) to print the receipt.', 'error');
+    }
   }
 
   /* ---------------- menu availability ---------------- */

@@ -2,6 +2,14 @@
 
 The version number also appears at the bottom of the shop dashboard and in the health check.
 
+## 1.6.0
+
+- **Paper receipts:** each order on the dashboard, and each order in History, has a **🖨 Print receipt** button.
+  - **What prints:** only a receipt-sized slip. It shows the shop name, order number, date and time, customer name, pickup or delivery room, payment method, every item with its drink options and price, the total, and a footer line.
+  - **Special cases:** cancelled orders print "ORDER CANCELLED — NO CHARGE". Unavailable items are listed as no charge.
+  - **Paper sizes:** it fits 58 mm and 80 mm receipt printers and prints centered on normal paper.
+- **New setting:** `RECEIPT_FOOTER` (default "Thank you!").
+
 ## 1.5.0
 
 - **Reset for go-live:** new Sheet menu option **Coffee Shop → Reset for go-live**. After testing it:

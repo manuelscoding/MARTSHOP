@@ -215,6 +215,18 @@ Customers can filter by category with the chips at the top (All / Drinks / Snack
 - **Card layout:** `card()` in `ShopJs.html`. Always use `h('tag', {...}, text)` to show text. **Never** use `innerHTML` with customer data; it would let someone inject code via their name.
 - **Cancel:** needs a confirmation. The customer is emailed with the optional reason (`sendCancelledEmail_` in `Email.gs`).
 
+### Paper receipts
+
+- **How to print:** on the dashboard, tap **🖨 Print receipt** on any order card, or open an order in **History** and tap **🖨 Print receipt** for a reprint. The browser's print window opens; choose the receipt printer (or a normal printer) and print.
+- **What prints:** only the receipt, never the dashboard. It shows the shop name, order number, time, name, pickup/delivery room, payment, the items with drink options and prices, the total, and your footer. Cancelled orders say "ORDER CANCELLED — NO CHARGE".
+- **Footer text:** Settings → `RECEIPT_FOOTER`, e.g. `Thank you! Go Spartans!`. Blank means no footer.
+- **Receipt printers:** the slip fits 58 mm and 80 mm thermal printers.
+  - In the print window, set **Margins: None** or **Minimum**, and turn **Headers and footers** off.
+  - Chrome remembers these choices for next time.
+  - To print with no dialog at all on a dedicated counter computer, ask IT about Chrome's "kiosk printing" mode.
+- **If the print window doesn't open**, press **Ctrl+P** (Cmd+P on a Mac) right after tapping Print receipt; the receipt is already prepared.
+- **Where it lives:** `ShopJs.html` → `printReceipt()`. The print layout is in `Styles.html` under "printed receipts".
+
 ## 7. Unavailable-item emails
 
 **What it does.** Staff tap **Item unavailable**, tick the item(s), and optionally tick "Also turn these items off on the menu". Then:
@@ -483,6 +495,8 @@ Order records (name, school email, room, what they ordered and when) about ident
 | Let another drink have options | Menu tab → tick `Customizable` |
 | Start order numbers at #1 after testing | Sheet → **Coffee Shop → Reset for go-live** → type `RESET` (before real orders only) |
 | Start numbers somewhere else (e.g. #100) | Set `ORDER_NUMBER_START` to `100`, then run **Reset for go-live** |
+| Print a receipt for a customer | Dashboard → order card (or History) → **🖨 Print receipt** |
+| Change the receipt's bottom line | Settings → `RECEIPT_FOOTER` |
 | Close for a holiday | Settings → `ORDERING_ENABLED` = `FALSE` (back to `TRUE` after) |
 | Find last week's order | Dashboard → **History** → pick the date |
 | Fix a mistakenly completed order | Dashboard → **History** → open it → **Reopen order** |

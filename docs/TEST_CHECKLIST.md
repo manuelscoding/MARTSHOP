@@ -181,6 +181,15 @@ Tip: set `ORDER_OPEN_TIME` and `ORDER_CLOSE_TIME` to blank while testing, so the
 | 12c.5 | On Review, remove every line | You return to the menu with "Your order is empty". |
 | 12c.6 | After removing items, place the order | The order saves with exactly the remaining items and the correct total. |
 
+## 12d. Paper receipts
+
+| # | Steps | Expected |
+|---|---|---|
+| 12d.1 | On the dashboard, tap **🖨 Print receipt** on an order with drink options | The print window opens. The preview shows **only** the receipt (not the dashboard): order #, time, name, pickup/room, payment, items with options and prices, total, footer. |
+| 12d.2 | Print it on the counter's receipt printer (or save as PDF) | Nothing is cut off at the edges on 80 mm (or 58 mm) paper. |
+| 12d.3 | History → open a cancelled order → **🖨 Print receipt** | The receipt shows TOTAL $0.00 and "ORDER CANCELLED — NO CHARGE". |
+| 12d.4 | Close the print window, then keep using the dashboard | The dashboard looks and works normally. |
+
 ## 13. Students (only if enabling)
 
 | # | Steps | Expected |

@@ -436,6 +436,7 @@ function getShopBootstrap() {
       pollSeconds: s.POLL_SECONDS,
       appVersion: CONFIG.APP_VERSION,
       awaitingWarnMinutes: s.AWAITING_WARN_MINUTES,
+      receiptFooter: s.RECEIPT_FOOTER,
       user: { email: ctx.email, name: ctx.staffName, role: ctx.staffRole },
       statuses: CONFIG.STATUS
     };

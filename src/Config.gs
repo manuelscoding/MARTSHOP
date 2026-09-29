@@ -11,7 +11,7 @@
  */
 
 var CONFIG = Object.freeze({
-  APP_VERSION: '1.5.0',
+  APP_VERSION: '1.6.0',
 
   SHEETS: Object.freeze({
     MENU: 'Menu',
@@ -84,6 +84,7 @@ var DEFAULT_SETTINGS = [
   // --- General ---
   ['SHOP_NAME', 'Staff Coffee Shop', 'Name shown on the app and in emails.'],
   ['CURRENCY_SYMBOL', '$', 'Currency symbol shown before prices.'],
+  ['RECEIPT_FOOTER', 'Thank you!', 'Line printed at the bottom of paper receipts (e.g. "Thank you! Go Spartans!"). Blank = none.'],
   ['FAVICON_URL', 'https://fonts.gstatic.com/s/e/notoemoji/latest/2615/512.png', 'Browser-tab icon for the ordering page: an https link to a PNG/ICO image. Default: a coffee cup. Blank = Google\'s default icon.'],
   ['SHOP_FAVICON_URL', 'https://fonts.gstatic.com/s/e/notoemoji/latest/1f4cb/512.png', 'Browser-tab icon for the shop dashboard, so staff can tell the tabs apart. Default: a clipboard. Blank = same as FAVICON_URL.'],
 
