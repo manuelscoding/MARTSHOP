@@ -247,6 +247,7 @@ function onOpen() {
     .addItem('Clear settings cache', 'clearCache')
     .addSeparator()
     .addItem('Archive old orders now', 'archiveOldOrders')
+    .addItem('Reset for go-live (clear test orders, restart at #1)', 'resetForLaunch')
     .addItem('Install maintenance triggers', 'installTriggers')
     .addToUi();
 }
@@ -408,4 +409,62 @@ function reportHealth_(errors, warnings, info) {
   console.log(text);
   try { SpreadsheetApp.getUi().alert('Coffee Shop health check', text, SpreadsheetApp.getUi().ButtonSet.OK); } catch (e) { /* run from editor */ }
   return { errors: errors, warnings: warnings, info: info };
+}
+
+/**
+ * ONE-TIME, before going live: removes all test orders and restarts order
+ * numbers at ORDER_NUMBER_START (normally 1).
+ *
+ *   - Saves a copy of the Orders tab first ("Backup – test orders <date>").
+ *   - Clears the Orders, Archive and Errors tabs (headers stay).
+ *   - Keeps Menu, Options, Staff and Settings exactly as they are.
+ *
+ * Owner only, and only from the Sheet menu (Coffee Shop > Reset for go-live),
+ * because it asks you to type RESET to confirm.
+ */
+function resetForLaunch() {
+  requireOwner_();
+  var ui;
+  try { ui = SpreadsheetApp.getUi(); } catch (e) {
+    throw new Error('Run this from the spreadsheet: Coffee Shop > Reset for go-live. It needs you to type RESET to confirm.');
+  }
+  var ss = getSs_();
+  var s = getSettings_();
+  var data = loadOrders_();
+  var total = data.orders.length;
+  var active = data.orders.filter(function (o) { return CONFIG.ACTIVE_STATUSES.indexOf(o.status) !== -1; }).length;
+  var start = s.ORDER_NUMBER_START;
+
+  var reply = ui.prompt('Reset for go-live',
+    'This permanently clears ' + total + ' order(s)' + (active ? ' (' + active + ' STILL ACTIVE)' : '') +
+    ', the Archive tab and the Errors tab, and the next order will be #' + start + '.\n\n' +
+    'A backup copy of the Orders tab is saved first. Menu, Options, Staff and Settings are not changed.\n\n' +
+    'Only do this before real customers start ordering.\n\nType RESET to continue:',
+    ui.ButtonSet.OK_CANCEL);
+  if (reply.getSelectedButton() !== ui.Button.OK || String(reply.getResponseText()).trim().toUpperCase() !== 'RESET') {
+    ui.alert('Nothing was changed.');
+    return { reset: false };
+  }
+
+  var backupName = withLock_(function () {
+    var orders = getSheet_(CONFIG.SHEETS.ORDERS);
+    var name = '';
+    if (orders.getLastRow() > 1) {
+      name = 'Backup – test orders ' + Utilities.formatDate(new Date(), s.TIMEZONE, 'yyyy-MM-dd HHmm');
+      orders.copyTo(ss).setName(name);
+    }
+    [CONFIG.SHEETS.ORDERS, CONFIG.SHEETS.ARCHIVE, CONFIG.SHEETS.ERRORS].forEach(function (n) {
+      var sh = ss.getSheetByName(n);
+      if (sh && sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow() - 1, Math.max(sh.getLastColumn(), 1)).clearContent();
+    });
+    PropertiesService.getScriptProperties().setProperty('LAST_ORDER_NUMBER', String(start - 1));
+    touchOrdersVersion_();          // dashboards refresh and show an empty list
+    return name;
+  });
+
+  ui.alert('Reset complete',
+    'Test orders cleared. The next order will be #' + start + '.' +
+    (backupName ? '\n\nA copy of the test orders was saved in the "' + backupName + '" tab. You can delete that tab whenever you like.' : ''),
+    ui.ButtonSet.OK);
+  return { reset: true, backup: backupName, next: start };
 }

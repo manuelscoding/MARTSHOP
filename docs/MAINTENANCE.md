@@ -481,6 +481,8 @@ Order records (name, school email, room, what they ordered and when) about ident
 | Add a syrup / sweetener / creamer | **Options** tab → new row |
 | Mark Honey (or any option) as out | Dashboard → **Menu** tab → **Drink options** switch |
 | Let another drink have options | Menu tab → tick `Customizable` |
+| Start order numbers at #1 after testing | Sheet → **Coffee Shop → Reset for go-live** → type `RESET` (before real orders only) |
+| Start numbers somewhere else (e.g. #100) | Set `ORDER_NUMBER_START` to `100`, then run **Reset for go-live** |
 | Close for a holiday | Settings → `ORDERING_ENABLED` = `FALSE` (back to `TRUE` after) |
 | Find last week's order | Dashboard → **History** → pick the date |
 | Fix a mistakenly completed order | Dashboard → **History** → open it → **Reopen order** |

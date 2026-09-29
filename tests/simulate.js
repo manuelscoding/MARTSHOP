@@ -30,6 +30,9 @@ function makeSheet(name) {
     appendRow(values) { const r = sheet.getLastRow() + 1; sheet.getRange(r, 1, 1, values.length).setValues([values]); },
     setFrozenRows() {}, setColumnWidth() {},
     protections: [],
+    copyTo() { const copy = makeSheet(name + ' copy'); copy.data = sheet.data.map(r => r.slice());
+      copy.setName = (n) => { delete sheets[copy.name]; copy.name = n; sheets[n] = copy; return copy; };
+      sheets[copy.name] = copy; return copy; },
     getProtections() { return sheet.protections; },
     protect() { const pr = { setDescription: () => pr, setWarningOnly: (w) => { pr.warningOnly = w; return pr; } }; sheet.protections.push(pr); return pr; },
     getRange(row, col, nr = 1, nc = 1) {
@@ -89,7 +92,7 @@ const g = {
   __triggers: [],
   SpreadsheetApp: {
     getActiveSpreadsheet: () => ss, openById: () => ss, flush() {},
-    getUi() { throw new Error('no ui'); },
+    getUi() { if (!g.__ui) throw new Error('no ui'); return g.__ui; },
     ProtectionType: { SHEET: 'SHEET' },
     newDataValidation() { const b = { requireCheckbox: () => b, requireValueInList: () => b, setAllowInvalid: () => b, setHelpText: () => b, build: () => ({}) }; return b; }
   },
@@ -929,6 +932,46 @@ test('upgrade: drink-options popup works on a Sheet set up before 1.3, with or w
     sheets.Options = savedOptions;
     cacheMap.clear();
   }
+});
+
+test('reset for go-live: clears test orders, backs them up, restarts at #1', () => {
+  const fakeUi = (answer) => ({
+    ButtonSet: { OK_CANCEL: 'OK_CANCEL', OK: 'OK' }, Button: { OK: 'OK', CANCEL: 'CANCEL' },
+    prompt: () => ({ getSelectedButton: () => (answer === null ? 'CANCEL' : 'OK'), getResponseText: () => answer || '' }),
+    alert: () => {}
+  });
+  const before = sheets.Orders.getLastRow();
+  assert.ok(before > 5, 'there should be test orders');
+  const menuBefore = JSON.stringify(sheets.Menu.data), staffBefore = JSON.stringify(sheets.Staff.data);
+  // Not the owner -> refused
+  as(TEACHER);
+  assert.throws(() => g.resetForLaunch(), /owner/);
+  // Owner but not from the Sheet menu (no UI) -> refused
+  as(ownerEmail);
+  assert.throws(() => g.resetForLaunch(), /Coffee Shop > Reset/);
+  // Wrong word or Cancel -> nothing changes
+  g.__ui = fakeUi('reset please');
+  assert.strictEqual(g.resetForLaunch().reset, false);
+  g.__ui = fakeUi(null);
+  assert.strictEqual(g.resetForLaunch().reset, false);
+  assert.strictEqual(sheets.Orders.getLastRow(), before);
+  // Typing RESET -> cleared, backed up, numbering restarts
+  g.__ui = fakeUi(' reset ');
+  const r = g.resetForLaunch();
+  g.__ui = null;
+  assert.strictEqual(r.reset, true);
+  assert.strictEqual(r.next, 1);
+  assert.strictEqual(sheets.Orders.getLastRow(), 1);
+  assert.strictEqual(sheets.Orders.data[0][0], 'OrderNumber');       // header kept
+  assert.strictEqual(sheets.Errors.getLastRow(), 1);
+  assert.strictEqual(sheets[r.backup].getLastRow(), before);           // backup has every test order
+  assert.strictEqual(JSON.stringify(sheets.Menu.data), menuBefore);
+  assert.strictEqual(JSON.stringify(sheets.Staff.data), staffBefore);
+  as(OTHER_TEACHER);
+  assert.strictEqual(ok(g.submitOrder(order({ name: 'Bob', delivery: false }))).orderNumber, 1);
+  assert.strictEqual(ok(g.submitOrder(order({ name: 'Bob', delivery: false }))).orderNumber, 2);
+  as(STAFF);
+  assert.strictEqual(ok(g.getHistory({})).orders.length, 0);          // test orders gone from History
 });
 
 test('Orders sheet grows past its row limit without errors', () => {

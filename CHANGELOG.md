@@ -2,6 +2,15 @@
 
 The version number also appears at the bottom of the shop dashboard and in the health check.
 
+## 1.5.0
+
+- **Reset for go-live:** new Sheet menu option **Coffee Shop → Reset for go-live**. After testing it:
+  - saves a backup copy of the test orders
+  - clears the Orders, Archive and Errors tabs
+  - restarts order numbers at `ORDER_NUMBER_START` (normally #1)
+
+  Menu, Options, Staff and Settings are untouched. It is owner-only and requires typing `RESET`.
+
 ## 1.4.0
 
 - **Remove on the menu:** every item in the order has a **Remove** button on its menu card. Tapping it takes the item out completely, including all its drink options.

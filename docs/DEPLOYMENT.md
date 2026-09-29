@@ -134,7 +134,7 @@ Tick every line before announcing the app.
 - [ ] `WEB_APP_URL` is the `/exec` link, `ADMIN_ALERT_EMAIL` is set, and `SEND_EMAILS` is `TRUE`.
 - [ ] The maintenance triggers are installed.
 - [ ] The test checklist has been run with one staff account, one teacher account and one student account (`1111111@…`). The student is refused until you choose to enable students.
-- [ ] Test orders are cancelled. Optionally delete the test rows from the Orders tab **before** launch (never after).
+- [ ] **Last step before announcing:** in the Sheet, choose **Coffee Shop → Reset for go-live** and type `RESET`. This clears all test orders, the Archive and the Errors log, and the first real order will be **#1**. A backup copy of the test orders is saved in a new tab (delete it whenever you like). Menu, Options, Staff and Settings are not touched. **Never run it after real orders have started**, because it removes them from the dashboard and History.
 - [ ] **Counter tablet:**
   - plugged in, with the screen set never to sleep while charging
   - signed in to **only** the staff account

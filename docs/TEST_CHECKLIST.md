@@ -194,4 +194,14 @@ Tip: set `ORDER_OPEN_TIME` and `ORDER_CLOSE_TIME` to blank while testing, so the
 
 ---
 
+## 14. Go-live reset (do this last, once)
+
+| # | Steps | Expected |
+|---|---|---|
+| 14.1 🤖 | **Coffee Shop → Reset for go-live**, type anything other than `RESET` (or press Cancel) | "Nothing was changed." |
+| 14.2 🤖 | Run it again and type `RESET` | A "Backup – test orders …" tab appears. Orders, Archive and Errors are empty, and the dashboard and History show no orders. |
+| 14.3 🤖 | Place a real first order | It is order **#1**. |
+
+---
+
 **Sign-off:** Tester __________ Date __________ Deployment version __________
