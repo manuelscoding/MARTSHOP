@@ -11,13 +11,14 @@
  */
 
 var CONFIG = Object.freeze({
-  APP_VERSION: '1.2.0',
+  APP_VERSION: '1.3.0',
 
   SHEETS: Object.freeze({
     MENU: 'Menu',
     ORDERS: 'Orders',
     STAFF: 'Staff',
     SETTINGS: 'Settings',
+    OPTIONS: 'Options',
     ERRORS: 'Errors',
     ARCHIVE: 'Archive'
   }),
@@ -25,7 +26,8 @@ var CONFIG = Object.freeze({
   // Column headers. Code looks columns up BY NAME, so you may reorder columns
   // in the sheet, but do not rename or delete them.
   HEADERS: Object.freeze({
-    MENU: ['ItemID', 'Name', 'Price', 'Available', 'Category', 'SortOrder', 'Icon', 'Tag'],
+    MENU: ['ItemID', 'Name', 'Price', 'Available', 'Category', 'SortOrder', 'Icon', 'Tag', 'Customizable'],
+    OPTIONS: ['OptionID', 'Group', 'Name', 'Price', 'Available', 'SortOrder'],
     ORDERS: [
       'OrderNumber', 'Timestamp', 'CustomerEmail', 'CustomerName', 'ItemsJSON',
       'Total', 'Delivery', 'RoomNumber', 'PaymentMethod', 'Status',
@@ -68,7 +70,8 @@ var CONFIG = Object.freeze({
     NAME_MAX: 60,
     NOTE_MAX: 200,
     ROOM_MAX: 20,
-    HISTORY_ENTRIES_MAX: 60
+    HISTORY_ENTRIES_MAX: 60,
+    MAX_OPTIONS_PER_ITEM: 8
   })
 });
 
@@ -96,8 +99,10 @@ var DEFAULT_SETTINGS = [
   ['ORDER_OPEN_TIME', '07:00', '24-hour time ordering opens (HH:MM). Blank = no limit.'],
   ['ORDER_CLOSE_TIME', '14:30', '24-hour time ordering closes (HH:MM). Blank = no limit.'],
 
-  // --- Delivery ---
+  // --- Delivery & pickup ---
   ['DELIVERY_ENABLED', true, 'FALSE = pickup only for everyone.'],
+  ['PICKUP_ENABLED', true, 'FALSE pauses pickup orders (delivery only), e.g. to limit how many people come to the shop. Staff can switch this from the dashboard.'],
+  ['MAX_ACTIVE_PICKUPS', 0, 'If > 0, pickup pauses automatically while this many pickup orders are waiting, and reopens as they are completed. 0 = no limit.'],
   ['ROOM_PATTERN', '^[A-Z]?[0-9]{1,4}[A-Z]?$', 'Pattern a room number must match (after converting to UPPERCASE). Default accepts 214, B12, 101A.'],
   ['NAMED_ROOMS', 'LIBRARY,GYM,MAIN OFFICE,CAFETERIA,AUDITORIUM,COUNSELING', 'Comma-separated room NAMES accepted in addition to the pattern.'],
 
@@ -215,6 +220,34 @@ function coerceSetting_(raw, def, tz) {
   // Text. Sheets may turn "07:00" into a time value; convert it back.
   if (raw instanceof Date) return Utilities.formatDate(raw, tz, 'HH:mm');
   return String(raw).trim();
+}
+
+/**
+ * Writes one Settings value (used by the dashboard's pickup switch). Adds the
+ * row if it is missing. Caller must hold the lock.
+ */
+function setSettingValueNoLock_(key, value) {
+  var def = DEFAULT_SETTINGS.filter(function (d) { return d[0] === key; })[0];
+  if (!def) throw new Error('Unknown setting ' + key);
+  var sheet = getSheet_(CONFIG.SHEETS.SETTINGS);
+  var text = typeof value === 'boolean' ? (value ? 'TRUE' : 'FALSE') : String(value);
+  var last = sheet.getLastRow();
+  var keys = last > 1 ? sheet.getRange(2, 1, last - 1, 1).getValues() : [];
+  for (var i = 0; i < keys.length; i++) {
+    if (String(keys[i][0]).trim().toUpperCase() === key) {
+      sheet.getRange(i + 2, 2).setValue(text);
+      invalidateSettings_();
+      return;
+    }
+  }
+  ensureRows_(sheet, last + 1);
+  sheet.getRange(last + 1, 1, 1, 3).setValues([[key, text, def[2]]]);
+  invalidateSettings_();
+}
+
+function invalidateSettings_() {
+  try { CacheService.getScriptCache().remove('settings_v1'); } catch (e) { /* best-effort */ }
+  settingsMemo_ = null;
 }
 
 /** Clears cached Settings and Staff so sheet edits apply immediately. */

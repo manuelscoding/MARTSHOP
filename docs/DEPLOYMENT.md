@@ -63,6 +63,7 @@ Allow about 20 minutes. You need a Google Workspace account on your school domai
    - `STUDENT_EMAIL_PATTERN`: leave as `^[0-9]{3,9}`, so numeric accounts like `1111111@district.org` are treated as students. They are refused until `STUDENT_ORDERING_ENABLED` is `TRUE`.
    - `ORDER_DAYS`, `ORDER_OPEN_TIME`, `ORDER_CLOSE_TIME`: blank means no limit
    - `REPLY_TO_EMAIL` (optional)
+   - `PICKUP_ENABLED` / `MAX_ACTIVE_PICKUPS`: pause pickup (delivery only), or cap how many pickup orders can wait at once. Staff can also switch pickup on and off from the dashboard.
    - `FAVICON_URL` / `SHOP_FAVICON_URL`: the browser-tab icons. They default to ☕ and 📋; replace them with an `https://` link to your school logo if you like.
    - `ADMIN_ALERT_EMAIL`: the person (or IT inbox) to email if the app hits an unexpected error. At most one alert per hour. **Recommended.**
    - While testing, set `SEND_EMAILS` to `FALSE` if you don't want real emails to go out.
@@ -144,6 +145,13 @@ Tick every line before announcing the app.
 
 ---
 
+## Upgrading an existing installation
+
+1. Replace every file's contents with the new versions from `src/`, including `appsscript.json`.
+2. Run `setup()` from the editor and approve the permissions prompt. `setup()` is safe on live data. It adds anything new (for 1.3.0: the **Options** tab, the Menu **Customizable** column with the four hot and iced drinks ticked, and the new pickup settings) and never removes data.
+3. Run **Coffee Shop → Check setup**.
+4. Publish a new version (below).
+
 ## Updating the app later (important)
 
 Editing the code does **not** change what users see until you publish a new version:
@@ -176,5 +184,6 @@ Google publishes the current numbers at <https://developers.google.com/apps-scri
 | Email links point at `/dev` or are missing | Set `WEB_APP_URL` in Settings to the `/exec` URL. |
 | "Your sign-in session may have expired, or you are signed in to more than one Google account" | This is a known Google limitation. The app can fail when a browser is signed in to several Google accounts at once (e.g. school + personal). Use a Chrome profile or window signed in **only** to the school account. |
 | Dashboard shows a red "This list may be out of date" banner | The tablet couldn't reach Google several times in a row. Check the Wi-Fi, then tap **Reload dashboard**. The banner clears itself once the connection returns. |
+| After updating to 1.3.0: "You do not have permission to call SpreadsheetApp…" or a new authorization prompt | Version 1.3.0 asks for **less** access: only this spreadsheet, not all your spreadsheets. Run `setup()` once from the Apps Script editor and approve, then publish a new version. |
 | Unsure whether everything is configured | Run **Coffee Shop → Check setup (health check)**. |
 | Something else | Look at the **Errors** tab (newest rows at the bottom), and at **Executions** in the Apps Script editor. |

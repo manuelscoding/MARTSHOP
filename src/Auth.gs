@@ -118,10 +118,10 @@ function getStaffMap_() {
   if (staffMemo_) return staffMemo_;
   var cached = cacheGet_('staff_v1');
   if (cached) {
-    staffMemo_ = JSON.parse(cached);
+    staffMemo_ = dict_(JSON.parse(cached));
     return staffMemo_;
   }
-  var map = {};
+  var map = dict_();
   var t = readTable_(CONFIG.SHEETS.STAFF, ['Email']);
   t.rows.forEach(function (r) {
     var email = String(r[t.idx.Email] || '').trim().toLowerCase();

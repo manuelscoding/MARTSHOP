@@ -70,6 +70,7 @@
       S.shopOpen = res.open !== false;
       if (!res.unchanged) {
         S.version = res.version;
+        if (res.pickup) renderPickupBar(res.pickup);
         receive(res.orders);
       }
       setConn(true);
@@ -192,7 +193,7 @@
         return h('li', { class: l.unavailable ? 'unavail' : '' },
           h('span', { class: 'qty' }, l.qty + '×'),
           l.icon ? h('span', { class: 'icon', 'aria-hidden': 'true' }, l.icon) : null,
-          h('span', { class: 'label' }, l.name),
+          h('span', { class: 'label' }, l.name, optionsLine(l)),
           l.unavailable ? h('span', { class: 'tag-unavail' }, 'UNAVAILABLE') : null,
           h('span', { class: 'price' }, App.money(l.lineTotal)));
       })),
@@ -268,7 +269,14 @@
   }
 
   function unavailableDialog(o) {
-    var candidates = o.items.filter(function (l) { return !l.unavailable; });
+    var seen = {};
+    var candidates = [];
+    o.items.forEach(function (l) {
+      if (l.unavailable) return;
+      if (seen[l.id]) { seen[l.id].qty += l.qty; return; }
+      seen[l.id] = { id: l.id, name: l.name, qty: l.qty };
+      candidates.push(seen[l.id]);
+    });
     if (!candidates.length) { App.toast('All items are already marked unavailable.', 'error'); return; }
     var boxes = candidates.map(function (l) {
       return { id: l.id, input: h('input', { type: 'checkbox', value: l.id }), line: l };
@@ -438,7 +446,7 @@
         h('p', { class: 'small' }, o.customerEmail + (o.customerType === 'Student' ? ' (student)' : '')),
         h('p', null, h('strong', null, o.delivery ? 'Delivery — Room ' + o.room : 'Pickup'), ' · ' + o.payment),
         h('ul', { class: 'order-items' }, o.items.map(function (l) {
-          return h('li', { class: l.unavailable ? 'unavail' : '' }, h('span', { class: 'qty' }, l.qty + '×'), h('span', { class: 'label' }, l.name),
+          return h('li', { class: l.unavailable ? 'unavail' : '' }, h('span', { class: 'qty' }, l.qty + '×'), h('span', { class: 'label' }, l.name, optionsLine(l)),
             l.unavailable ? h('span', { class: 'tag-unavail' }, 'UNAVAILABLE') : null,
             h('span', { class: 'price' }, App.money(l.lineTotal)));
         })),
@@ -467,7 +475,8 @@
 
   function loadMenu() {
     App.clear(menuEl).appendChild(App.loading('Loading menu…'));
-    App.call('getMenuAdmin').then(function (items) {
+    App.call('getMenuAdmin').then(function (res) {
+      var items = res.items || [];
       App.clear(menuEl);
       if (!items.length) { menuEl.appendChild(h('div', { class: 'empty' }, 'The Menu sheet has no items.')); return; }
       var lastCat = null;
@@ -494,8 +503,83 @@
         });
         menuEl.appendChild(row);
       });
+      renderOptionToggles(res.options || []);
     }).catch(function (err) {
       App.clear(menuEl).appendChild(App.errorPanel(err.message, loadMenu));
+    });
+  }
+
+  /** Drink options (sweeteners, creamers, syrups) can be switched off when they run out. */
+  function renderOptionToggles(options) {
+    if (!options.length) return;
+    menuEl.appendChild(h('h2', { style: 'margin-top:24px' }, 'Drink options'));
+    menuEl.appendChild(h('p', { class: 'muted small' }, 'Switch off an option (e.g. Honey) when it runs out. Customers will not be able to choose it.'));
+    var lastGroup = null;
+    options.forEach(function (o) {
+      if (o.group !== lastGroup) { menuEl.appendChild(h('h3', { class: 'category', text: o.group })); lastGroup = o.group; }
+      var id = 'opt-' + String(o.id).replace(/[^A-Za-z0-9_-]/g, '_');
+      var input = h('input', { type: 'checkbox', role: 'switch', id: id, checked: o.available, 'aria-label': o.group + ' ' + o.name + ' available' });
+      var row = h('div', { class: 'menu-admin-item' + (o.available ? '' : ' off') },
+        h('label', { class: 'switch', for: id }, input, h('span', { class: 'track', 'aria-hidden': 'true' })),
+        h('div', { style: 'flex:1' }, h('strong', null, o.name), o.price > 0 ? h('div', { class: 'small muted' }, '+' + App.money(o.price)) : null),
+        h('span', { class: 'small', 'data-state': '' }, o.available ? 'Available' : 'Off'));
+      input.addEventListener('change', function () {
+        var want = input.checked;
+        input.disabled = true;
+        App.call('setOptionAvailability', o.id, want).then(function () {
+          row.classList.toggle('off', !want);
+          row.querySelector('[data-state]').textContent = want ? 'Available' : 'Off';
+          App.toast(o.name + (want ? ' is available' : ' turned off'), 'ok');
+        }).catch(function (err) {
+          input.checked = !want;
+          App.toast(err.message, 'error');
+        }).then(function () { input.disabled = false; });
+      });
+      menuEl.appendChild(row);
+    });
+  }
+
+  /** "Sugar · Half and Half" under a drink, grouped the way baristas make it. */
+  function optionsLine(l) {
+    if (!l.options || !l.options.length) return null;
+    return h('span', { class: 'line-opts' }, l.options.map(function (o) { return o.name; }).join(' · '));
+  }
+
+  /* ---------------- pickup switch ---------------- */
+
+  var pickupBar = document.getElementById('pickupBar');
+  var pickupBusy = false;
+
+  /** Shows whether pickup is open, how many pickups are waiting, and the on/off switch. */
+  function renderPickupBar(p) {
+    App.clear(pickupBar);
+    pickupBar.hidden = false;
+    var input = h('input', { type: 'checkbox', role: 'switch', id: 'pickupSwitch', checked: p.enabled, disabled: pickupBusy,
+      'aria-describedby': 'pickupState' });
+    var stateText = !p.enabled
+      ? 'Paused by staff — customers can only choose delivery.'
+      : (p.max > 0 && p.active >= p.max)
+        ? 'Full: ' + p.active + ' of ' + p.max + ' pickups waiting. Pickup reopens as orders are completed.'
+        : 'Open' + (p.max > 0 ? ' · ' + p.active + ' of ' + p.max + ' pickups waiting' : ' · ' + p.active + ' pickup' + (p.active === 1 ? '' : 's') + ' waiting');
+    pickupBar.className = 'pickup-bar' + (!p.enabled || (p.max > 0 && p.active >= p.max) ? ' paused' : '');
+    pickupBar.appendChild(h('label', { class: 'switch', for: 'pickupSwitch' }, input, h('span', { class: 'track', 'aria-hidden': 'true' })));
+    pickupBar.appendChild(h('label', { for: 'pickupSwitch', class: 'pickup-label' }, h('strong', null, 'Pickup orders')));
+    pickupBar.appendChild(h('span', { id: 'pickupState', class: 'pickup-state' }, stateText));
+    input.addEventListener('change', function () {
+      var want = input.checked;
+      pickupBusy = true;
+      input.disabled = true;
+      App.call('setPickupEnabled', want).then(function (status) {
+        App.toast(want ? 'Pickup is open again' : 'Pickup paused — delivery only', 'ok');
+        pickupBusy = false;
+        renderPickupBar(status);
+        poll(true);
+      }).catch(function (err) {
+        pickupBusy = false;
+        input.checked = !want;
+        input.disabled = false;
+        App.toast(err.message, 'error');
+      });
     });
   }
 

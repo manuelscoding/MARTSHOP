@@ -45,6 +45,17 @@ try {
   if (manifest.runtimeVersion !== 'V8') fail('appsscript.json: runtimeVersion must be V8');
   if (!manifest.webapp || manifest.webapp.executeAs !== 'USER_DEPLOYING') fail('appsscript.json: webapp.executeAs must be USER_DEPLOYING');
   if (!manifest.webapp || manifest.webapp.access !== 'DOMAIN') fail('appsscript.json: webapp.access must be DOMAIN');
+  // Least privilege: only this spreadsheet, no Drive, no external requests.
+  const allowedScopes = [
+    'https://www.googleapis.com/auth/spreadsheets.currentonly',
+    'https://www.googleapis.com/auth/script.send_mail',
+    'https://www.googleapis.com/auth/userinfo.email',
+    'https://www.googleapis.com/auth/script.scriptapp',
+    'https://www.googleapis.com/auth/script.container.ui'
+  ];
+  (manifest.oauthScopes || []).forEach(sc => {
+    if (allowedScopes.indexOf(sc) === -1) fail('appsscript.json: scope ' + sc + ' is broader than the reviewed list. Review it, then update tests/check.js.');
+  });
 } catch (e) { fail('appsscript.json: ' + e.message); }
 
 // 3. Access-check guard
@@ -71,6 +82,19 @@ gsFiles.forEach(f => {
         'Add one, or rename it to end with "_" if browsers should not call it.');
     }
   }
+});
+
+// 3b. No HTML/script-injection sinks in browser code
+htmlFiles.forEach(f => {
+  const html = fs.readFileSync(path.join(src, f), 'utf8');
+  const code = html.replace(/\/\*[\s\S]*?\*\//g, '');
+  if (/\.innerHTML\s*=|outerHTML\s*=|insertAdjacentHTML|document\.write|\beval\(|new Function\(/.test(code)) {
+    fail(f + ': uses innerHTML/eval-style code. Build elements with App.h() so user text stays text.');
+  }
+  const raw = html.match(/<\?!=\s*([^?]*)\?>/g) || [];
+  raw.forEach(tag => {
+    if (!/^<\?!=\s*(include\('[A-Za-z]+'\);?|bootJson)\s*\?>$/.test(tag)) fail(f + ': unescaped template output ' + tag + ' (use <?= ?> instead).');
+  });
 });
 
 // 4. Includes

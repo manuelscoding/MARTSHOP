@@ -101,13 +101,11 @@ var ssMemo_ = null;
 /** The database spreadsheet (the Sheet this script is attached to). */
 function getSs_() {
   if (ssMemo_) return ssMemo_;
+  // The script only ever uses the Sheet it is attached to (least privilege:
+  // the manifest requests access to the current spreadsheet only).
   var ss = null;
   try { ss = SpreadsheetApp.getActiveSpreadsheet(); } catch (e) { ss = null; }
-  if (!ss) {
-    var id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
-    if (id) ss = SpreadsheetApp.openById(id);
-  }
-  if (!ss) throw new Error('Spreadsheet not found. Open the script from the Sheet (Extensions > Apps Script) and run setup().');
+  if (!ss) throw new Error('Spreadsheet not found. Create the script from the Sheet (Extensions > Apps Script) and run setup().');
   ssMemo_ = ss;
   return ss;
 }
@@ -160,6 +158,36 @@ function cacheGet_(key) {
 }
 function cachePut_(key, value, seconds) {
   try { CacheService.getScriptCache().put(key, value, seconds); } catch (e) { /* best-effort */ }
+}
+
+/**
+ * Per-user rate limit: at most `max` calls to `bucket` per `windowSeconds`.
+ * Protects the sheet and the email quota from scripted abuse. Uses the
+ * cache, so it is best-effort (a cache outage simply skips the limit).
+ */
+function rateLimit_(bucket, email, max, windowSeconds) {
+  var key = 'rl_' + bucket + '_' + Utilities.base64EncodeWebSafe(String(email || 'anon'));
+  var now = Date.now();
+  var state = null;
+  try { state = JSON.parse(cacheGet_(key) || 'null'); } catch (e) { state = null; }
+  if (!state || now - state.start > windowSeconds * 1000) state = { start: now, n: 0 };
+  state.n++;
+  cachePut_(key, JSON.stringify(state), windowSeconds);
+  if (state.n > max) {
+    throw new AppError('You are doing that too often. Please wait a few minutes and try again.');
+  }
+}
+
+/**
+ * An empty dictionary with no built-in properties. Use for any lookup table
+ * indexed by an ID that could come from a browser, so names such as
+ * "constructor" or "__proto__" can never match something built in.
+ * Pass an object to copy its own keys into a new dictionary.
+ */
+function dict_(from) {
+  var d = Object.create(null);
+  if (from) Object.keys(from).forEach(function (k) { d[k] = from[k]; });
+  return d;
 }
 
 /** HTML-escapes text for emails and server-rendered pages. */
@@ -308,7 +336,10 @@ function requireOwner_() {
  * one of this project's installed triggers.
  */
 function requireOwnerOrTrigger_(e) {
-  if (e && e.triggerUid) {
+  // A real time-driven trigger event carries Google's AuthMode enum object,
+  // which a browser cannot create through google.script.run (it can only send
+  // plain data), plus the ID of one of this project's installed triggers.
+  if (e && e.triggerUid && e.authMode === ScriptApp.AuthMode.FULL) {
     var uid = String(e.triggerUid);
     var ok = ScriptApp.getProjectTriggers().some(function (t) { return t.getUniqueId() === uid; });
     if (ok) return;

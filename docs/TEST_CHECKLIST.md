@@ -152,8 +152,23 @@ Tip: set `ORDER_OPEN_TIME` and `ORDER_CLOSE_TIME` to blank while testing, so the
 | 12.3 🤖 | Set `ADMIN_ALERT_EMAIL`, then cause an unexpected error (e.g. temporarily rename the Menu tab and load the customer page) | Exactly **one** alert email arrives, even if the error repeats within the hour. Rename the tab back. |
 | 12.4 | Disconnect the counter tablet's Wi-Fi for about a minute | A red "This list may be out of date" banner with a **Reload dashboard** button. It disappears on its own when Wi-Fi returns. |
 | 12.5 | Try to type in the **Orders** tab | Google Sheets shows a warning that the tab is managed by the app. |
+| 12.8 🤖 | Security probes: order an item with ID `constructor` or `__proto__`; call `archiveOldOrders({triggerUid:'…',authMode:'FULL'})` from the console; open a response link for someone else's order number | All refused. The response-link error is identical whether or not that order exists. |
 | 12.7 🤖 | Look at the browser tabs for the ordering page and the dashboard | ☕ on the ordering page, 📋 on the dashboard. A wrong `FAVICON_URL` shows no icon but the page still works, and **Check setup** warns about it. |
 | 12.6 🤖 | **Coffee Shop → Archive old orders now** | Old closed orders move to Archive, and error rows older than `ERROR_LOG_RETENTION_DAYS` are removed. |
+
+## 12b. Drink options and pickup limits
+
+| # | Steps | Expected |
+|---|---|---|
+| 12b.1 🤖 | Add 2 × Hot Coffee and 1 × Iced Coffee, then tap **Continue** | The **Customize your drinks** popup lists "Hot Coffee — cup 1 of 2", "cup 2 of 2" and "Iced Coffee", each with Sweeteners, Creamer and Syrups. |
+| 12b.2 🤖 | Cup 1: Sugar + Half and Half → **Same for all 2 cups**. Iced Coffee: Caramel Sugar Free. **Continue** | Review shows "2 × Hot Coffee — Half and Half, Sugar" and "1 × Iced Coffee — Caramel Sugar Free". The dashboard card and the email show the same. |
+| 12b.3 🤖 | Set a syrup's `Price` to 0.50 and order one drink with it | The line price and total include +$0.50, calculated by the server. |
+| 12b.4 🤖 | Dashboard → **Menu** → switch **Honey** off | Honey disappears from the popup. An order sent with Honey anyway is refused. |
+| 12b.5 🤖 | Console: send options for a non-customizable item, an unknown option, a duplicate, or 9+ options | Each is refused with a friendly error. No order is created. |
+| 12b.6 🤖 | Dashboard: switch **Pickup orders** off | The bar turns amber: "Paused by staff". Customers only get "Delivery to your room". A pickup sent via the console is refused. |
+| 12b.7 🤖 | Set `MAX_ACTIVE_PICKUPS` to the number of pickups waiting + 1, place one pickup, then try another | The first is accepted. The second is refused: "Pickup is full". Completing an order reopens pickup. |
+| 12b.8 🤖 | Pickup off **and** `DELIVERY_ENABLED` = `FALSE` | The customer page shows ordering closed: "Pickup is paused … please check back soon." |
+| 12b.9 🤖 | Revise an order that had drink options (after an item-unavailable email) | Each drink comes back with its options pre-selected. |
 
 ## 13. Students (only if enabling)
 

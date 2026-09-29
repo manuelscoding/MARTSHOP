@@ -96,6 +96,29 @@ Customers can filter by category with the chips at the top (All / Drinks / Snack
 - Rows with a missing ID/name, an invalid price or a duplicate ID are **skipped**, not shown.
 - **Already ran `setup()` with the old sample menu?** `setup()` only fills an **empty** Menu tab. Delete all rows under the header in the Menu tab, then run **Coffee Shop → Run setup / repair sheets**. It also adds the new `Icon` and `Tag` columns.
 
+### Drink options (sweeteners, creamers, syrups)
+
+**What it does.** When the cart has a **customizable** drink (Hot Coffee, Hot Tea, Iced Coffee and Hot Chocolate to start with) and the customer taps **Continue**, a **Customize your drinks** popup opens.
+
+- **Choosing options.** Each cup gets its own choices from three groups:
+  - **Sweeteners:** Sugar, Splenda, Honey
+  - **Creamer:** Half and Half, Vanilla, Caramel
+  - **Syrups:** Vanilla, Vanilla Sugar Free, Caramel, Caramel Sugar Free, Brown Sugar Cinnamon
+
+  With several cups, **Same for all cups** copies cup 1's choices. Leaving everything unticked means "as is".
+- **After the popup.** Customers can reopen it from the Review screen with **Change drink options**. The dashboard, History, emails and confirmation all show each drink's options, e.g. "2× Hot Coffee — Half and Half · Sugar".
+- **Where it lives.**
+  - Menu tab → `Customizable` column (checkbox), which decides which items get the popup.
+  - **Options** tab: `OptionID`, `Group`, `Name`, `Price`, `Available`, `SortOrder`.
+  - Code: `Menu.gs` → `readOptions_()`, `Orders.gs` → `buildLines_()` (validates and prices options on the server), and `CustomerJs.html` → `openCustomizer()`.
+- **How to change it safely.**
+  - **Make another drink customizable:** tick its `Customizable` box in the Menu tab.
+  - **Add an option:** add a row to the **Options** tab with a new unique `OptionID` (e.g. `SYRUP_HAZELNUT`), a `Group` (use an existing group name, or a new one to make a new heading), a `Name`, a `Price`, a ticked `Available` box and a `SortOrder`. Groups appear in order of their smallest `SortOrder`.
+  - **Charge for an option:** put the extra per-drink price in `Price` (e.g. `0.50`). It shows as "+$0.50" and is added on the server; `0` = free.
+  - **Ran out of something** (e.g. Honey): switch it off on the dashboard's **Menu** tab under **Drink options**, or untick `Available`.
+  - Never change an `OptionID` that has been used; untick `Available` instead.
+  - A drink can have at most 8 options.
+
 ## 3. Customer ordering
 
 **What it does.** Customers go through four steps (menu, delivery, payment, review) and submit. They then see a confirmation with an order number and get an email.
@@ -133,6 +156,24 @@ Customers can filter by category with the chips at the top (All / Drinks / Snack
   - building letter then dash then number (e.g. `A-104`): `^[A-Z]-[0-9]{3}$`
 - **Named places** (Library, Gym…): list them in `NAMED_ROOMS`, separated by commas.
 - Always test a new pattern with a few real room numbers. The server rejects anything that doesn't match.
+
+### Limiting pickups (how many people come to the shop)
+
+**What it does.** Staff can pause **pickup** so customers can only choose delivery, e.g. when the shop is crowded or short-staffed. Optionally, pickup can also pause **automatically** once a set number of pickup orders are waiting.
+
+- **Switch it on the dashboard.** The **Pickup orders** bar at the top of *Active orders* has an on/off switch.
+  - **Off** = customers go straight to "Delivery to your room" with a short note that pickup is paused.
+  - Every tablet shows the change within a few seconds.
+  - It's the same as setting `PICKUP_ENABLED` in Settings, which the switch writes for you.
+- **Automatic limit.** Set `MAX_ACTIVE_PICKUPS` (e.g. `8`) in Settings.
+  - Once that many pickup orders are waiting (Pending, In Progress or Awaiting Customer Response), new customers can only choose delivery.
+  - Pickup reopens by itself as orders are completed or cancelled.
+  - The dashboard bar shows, for example, "5 of 8 pickups waiting". `0` = no limit.
+- **If delivery is also off** (`DELIVERY_ENABLED` = `FALSE`, or students with student delivery off), pausing pickup means nobody can order. Customers see "Pickup is paused … please check back soon."
+- **Orders already placed** are never affected. A customer revising an existing pickup order can keep it as pickup.
+- **Where it lives.**
+  - Server: `Orders.gs` → `pickupStatus_()`, `assertPickupAvailable_()` (checked inside the order lock, so two people can't take the last slot at once), `setPickupEnabled()` (staff only).
+  - Screens: `CustomerJs.html` → `renderDelivery()`, and `ShopJs.html` → `renderPickupBar()`.
 
 ## 5. Payment
 
@@ -429,6 +470,11 @@ Order records (name, school email, room, what they ordered and when) about ident
 | Check the whole setup is correct | **Coffee Shop → Check setup (health check)** |
 | Get emailed when something breaks | Settings → `ADMIN_ALERT_EMAIL` |
 | Change the browser-tab icon | Settings → `FAVICON_URL` / `SHOP_FAVICON_URL` (an `https://` link to a PNG) |
+| Pause pickups (delivery only) | Dashboard → **Pickup orders** switch (or Settings → `PICKUP_ENABLED`) |
+| Limit how many pickups can wait | Settings → `MAX_ACTIVE_PICKUPS` (e.g. `8`; `0` = no limit) |
+| Add a syrup / sweetener / creamer | **Options** tab → new row |
+| Mark Honey (or any option) as out | Dashboard → **Menu** tab → **Drink options** switch |
+| Let another drink have options | Menu tab → tick `Customizable` |
 | Close for a holiday | Settings → `ORDERING_ENABLED` = `FALSE` (back to `TRUE` after) |
 | Find last week's order | Dashboard → **History** → pick the date |
 | Fix a mistakenly completed order | Dashboard → **History** → open it → **Reopen order** |

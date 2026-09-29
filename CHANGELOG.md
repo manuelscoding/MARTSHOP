@@ -2,6 +2,28 @@
 
 The version number also appears at the bottom of the shop dashboard and in the health check.
 
+## 1.3.0
+
+**Pickup limits**
+- **Pickup switch:** a **Pickup orders** on/off switch on the dashboard. When off, customers can only choose delivery. All tablets update within seconds.
+- **Automatic limit:** `MAX_ACTIVE_PICKUPS` pauses pickup while that many pickup orders are waiting, and reopens it as they are completed.
+
+**Drink options**
+- **Customize popup:** when the cart has a customizable drink (Hot Coffee, Hot Tea, Iced Coffee, Hot Chocolate), **Continue** opens a popup to choose Sweeteners (Sugar, Splenda, Honey), Creamer (Half and Half, Vanilla, Caramel) and Syrups (Vanilla, Vanilla Sugar Free, Caramel, Caramel Sugar Free, Brown Sugar Cinnamon).
+- **Per-cup choices:** each cup is set separately, with **Same for all cups**.
+- **Sheets:** a new **Options** tab (with optional per-option price) and a Menu **Customizable** column.
+- **Everywhere:** options show on the review screen, confirmation, emails, dashboard and History, and a revised order reopens with its options pre-selected.
+- **Running out:** staff can switch individual options off on the dashboard's Menu tab.
+
+**Security review and hardening**
+- **Lookups:** browser-supplied IDs can no longer match built-in object properties.
+- **Trigger jobs:** they require Google's `AuthMode` object, which can't be forged.
+- **Email-link errors:** they no longer reveal whether an order number exists.
+- **Least privilege:** access to the current spreadsheet only (re-authorize once after upgrading).
+- **Rate limits:** per-user limits on orders, email-link actions and page loads.
+- **Build checks:** new checks for `innerHTML`/`eval`, unescaped template output and permission creep.
+- **Tests:** 34 simulated test groups.
+
 ## 1.2.0
 
 - **Browser-tab icons:** ☕ for the ordering page and 📋 for the shop dashboard, so staff can tell the tabs apart. Both come from Google's emoji library.

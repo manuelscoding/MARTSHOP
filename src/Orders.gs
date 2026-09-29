@@ -59,9 +59,33 @@ function normalizeLines_(lines) {
       price: centsToAmount_(toCents_(l.price || 0)),
       qty: Math.max(0, Math.floor(Number(l.qty) || 0))
     };
+    if (Array.isArray(l.options) && l.options.length) {
+      line.options = l.options.slice(0, CONFIG.HARD_LIMITS.MAX_OPTIONS_PER_ITEM)
+        .filter(function (o) { return o && o.id; })
+        .map(function (o) {
+          return { id: String(o.id), name: String(o.name || o.id), group: String(o.group || ''), price: centsToAmount_(toCents_(o.price || 0)) };
+        });
+    }
     if (l.unavailable === true) line.unavailable = true;
     return line;
   });
+}
+
+/** "Hot Coffee (Sugar, Half and Half)" — used in emails and notes. */
+function lineLabel_(l) {
+  var opts = (l.options || []).map(function (o) { return o.name; });
+  return l.name + (opts.length ? ' (' + opts.join(', ') + ')' : '');
+}
+
+/** Order-line shape sent to browsers (customer or staff). */
+function lineForClient_(l, icons) {
+  var out = {
+    id: l.id, name: l.name, price: l.price, qty: l.qty,
+    lineTotal: centsToAmount_(toCents_(l.price) * l.qty),
+    options: (l.options || []).map(function (o) { return { id: o.id, name: o.name, group: o.group, price: o.price }; })
+  };
+  if (icons) out.icon = icons[l.id] || '';
+  return out;
 }
 
 /** Builds the sheet row for an order, preserving any extra columns. */
@@ -160,7 +184,9 @@ function toStaffOrder_(o, icons) {
     customerName: o.customerName,
     customerType: o.customerType,
     items: o.items.map(function (l) {
-      return { id: l.id, name: l.name, icon: icons[l.id] || '', price: l.price, qty: l.qty, lineTotal: centsToAmount_(toCents_(l.price) * l.qty), unavailable: !!l.unavailable };
+      var c = lineForClient_(l, icons);
+      c.unavailable = !!l.unavailable;
+      return c;
     }),
     total: o.total,
     totalIfContinued: centsToAmount_(totalCents_(o.items, false)),
@@ -184,9 +210,7 @@ function toCustomerSummary_(o) {
     orderNumber: o.orderNumber,
     customerName: o.customerName,
     customerEmail: o.customerEmail,
-    items: o.items.filter(function (l) { return !l.unavailable; }).map(function (l) {
-      return { id: l.id, name: l.name, price: l.price, qty: l.qty, lineTotal: centsToAmount_(toCents_(l.price) * l.qty) };
-    }),
+    items: o.items.filter(function (l) { return !l.unavailable; }).map(function (l) { return lineForClient_(l); }),
     total: o.total,
     delivery: o.delivery,
     room: o.room,
@@ -200,43 +224,76 @@ function toCustomerSummary_(o) {
  * ========================================================================= */
 
 /**
- * Turns the browser's [{id, qty}] into priced order lines using the Menu
- * sheet. Any price the browser sends is ignored.
+ * Turns the browser's [{id, qty, options:[optionId...]}] into priced order
+ * lines using the Menu and Options sheets. Any price the browser sends is
+ * ignored. The same item with the same options is merged into one line; the
+ * same item with different options becomes separate lines.
  */
-function buildLines_(rawItems, menuMap, rules, blockedIds) {
+function buildLines_(rawItems, menuMap, rules, blockedIds, optionMap) {
   blockedIds = blockedIds || [];
+  optionMap = optionMap || {};
+  var invalid = 'Your order contains an invalid item. Please reload and try again.';
   if (!Array.isArray(rawItems) || rawItems.length === 0) {
     throw new AppError('Please add at least one item to your order.');
   }
   if (rawItems.length > CONFIG.HARD_LIMITS.MAX_LINES_PER_ORDER) {
     throw new AppError('Your order has too many different items.');
   }
-  var qtyById = {};
-  var ids = [];
+  var byKey = dict_();
+  var keys = [];
+  var qtyById = dict_();
   rawItems.forEach(function (raw) {
-    if (!raw || typeof raw !== 'object') throw new AppError('Your order contains an invalid item. Please reload and try again.');
+    if (!raw || typeof raw !== 'object') throw new AppError(invalid);
     var id = String(raw.id || '').trim();
-    if (!id || id.length > 60) throw new AppError('Your order contains an invalid item. Please reload and try again.');
+    if (!id || id.length > 60) throw new AppError(invalid);
     var q = Number(raw.qty);
     if (!Number.isInteger(q) || q < 1 || q > rules.maxQtyPerItem) {
       throw new AppError('Quantities must be whole numbers from 1 to ' + rules.maxQtyPerItem + '.');
     }
-    if (!qtyById[id]) ids.push(id);
-    qtyById[id] = (qtyById[id] || 0) + q;
-  });
-
-  var totalQty = 0;
-  var lines = ids.map(function (id) {
     var item = menuMap[id];
     if (!item) throw new AppError('An item in your order is no longer on the menu. Please review your order.');
     if (!item.available || blockedIds.indexOf(id) !== -1) {
       throw new AppError(item.name + ' is not available right now. Please remove it from your order.');
     }
-    var q = qtyById[id];
-    if (q > rules.maxQtyPerItem) throw new AppError('You can order at most ' + rules.maxQtyPerItem + ' of ' + item.name + '.');
-    totalQty += q;
-    return { id: id, name: item.name, price: item.price, qty: q };
+
+    // Drink options (sweeteners, creamers, syrups)
+    var rawOpts = raw.options === undefined || raw.options === null ? [] : raw.options;
+    if (!Array.isArray(rawOpts)) throw new AppError(invalid);
+    if (rawOpts.length > CONFIG.HARD_LIMITS.MAX_OPTIONS_PER_ITEM) {
+      throw new AppError('Please choose at most ' + CONFIG.HARD_LIMITS.MAX_OPTIONS_PER_ITEM + ' options for each drink.');
+    }
+    if (rawOpts.length && !item.customizable) throw new AppError(item.name + ' cannot be customized.');
+    var optIds = [];
+    rawOpts.forEach(function (oid) {
+      oid = String(oid === null || oid === undefined ? '' : oid).trim();
+      if (!oid || oid.length > 40 || optIds.indexOf(oid) !== -1) throw new AppError(invalid);
+      var opt = optionMap[oid];
+      if (!opt) throw new AppError('A drink option you chose is no longer offered. Please review your ' + item.name + '.');
+      if (!opt.available) throw new AppError(opt.name + ' is not available right now. Please change your ' + item.name + '.');
+      optIds.push(oid);
+    });
+    optIds.sort();
+
+    var key = id + '|' + optIds.join(',');
+    if (!byKey[key]) {
+      var options = optIds.map(function (oid) {
+        var o = optionMap[oid];
+        return { id: o.id, name: o.name, group: o.group, price: o.price };
+      });
+      var unitCents = toCents_(item.price) + options.reduce(function (c, o) { return c + toCents_(o.price); }, 0);
+      byKey[key] = { id: id, name: item.name, price: centsToAmount_(unitCents), qty: 0 };
+      if (options.length) byKey[key].options = options;
+      keys.push(key);
+    }
+    byKey[key].qty += q;
+    qtyById[id] = (qtyById[id] || 0) + q;
+    if (qtyById[id] > rules.maxQtyPerItem) {
+      throw new AppError('You can order at most ' + rules.maxQtyPerItem + ' of ' + item.name + '.');
+    }
   });
+
+  var totalQty = 0;
+  var lines = keys.map(function (k) { totalQty += byKey[k].qty; return byKey[k]; });
   if (totalQty > rules.maxItemsPerOrder) {
     throw new AppError('Orders are limited to ' + rules.maxItemsPerOrder + ' items in total.');
   }
@@ -302,7 +359,8 @@ function submitOrder(payload) {
     if (!win.open) throw new AppError(win.message);
     payload = (payload && typeof payload === 'object') ? payload : {};
 
-    var lines = buildLines_(payload.items, getMenuMap_(), rules, []);
+    rateLimit_('order', ctx.email, 15, 600);
+    var lines = buildLines_(payload.items, getMenuMap_(), rules, [], getOptionMap_());
     var details = validateDetails_(payload, rules);
 
     // Double-submit protection: the same requestId always returns the same order.
@@ -315,6 +373,7 @@ function submitOrder(payload) {
         if (prior) return { duplicate: JSON.parse(prior) };
       }
       var data = loadOrders_();
+      if (!details.delivery) assertPickupAvailable_(data, rules, 0);
       if (rules.maxActiveOrders > 0) {
         var active = data.orders.filter(function (o) {
           return o.customerEmail === ctx.email && CONFIG.ACTIVE_STATUSES.indexOf(o.status) !== -1;
@@ -391,7 +450,8 @@ function getActiveOrders(sinceVersion) {
   return api_('getActiveOrders', function () {
     requireStaff_();
     var version = getOrdersVersion_();
-    var open = getOrderingWindow_(getRules_(getUserContext_())).open;
+    var rules = getRules_(getUserContext_());
+    var open = getOrderingWindow_(rules).open;
     if (sinceVersion && String(sinceVersion) === version) {
       return { unchanged: true, version: version, serverNow: Date.now(), open: open };
     }
@@ -399,7 +459,8 @@ function getActiveOrders(sinceVersion) {
     var active = data.orders.filter(function (o) { return CONFIG.ACTIVE_STATUSES.indexOf(o.status) !== -1; });
     active.sort(function (a, b) { return (a.timestamp - b.timestamp) || (a.orderNumber - b.orderNumber); });
     var icons = getMenuIcons_();
-    return { version: version, serverNow: Date.now(), open: open, orders: active.map(function (o) { return toStaffOrder_(o, icons); }) };
+    return { version: version, serverNow: Date.now(), open: open, pickup: pickupStatus_(data, rules),
+      orders: active.map(function (o) { return toStaffOrder_(o, icons); }) };
   });
 }
 
@@ -497,10 +558,10 @@ function markItemsUnavailable(orderNumber, itemIds, alsoMarkMenu) {
     var r = changeOrder_(orderNumber, [CONFIG.STATUS.PENDING, CONFIG.STATUS.IN_PROGRESS, CONFIG.STATUS.AWAITING], function (o) {
       var names = [];
       ids.forEach(function (id) {
-        var line = o.items.filter(function (l) { return l.id === id; })[0];
-        if (!line) throw new AppError('One of the selected items is not in order #' + o.orderNumber + '. Please refresh.');
-        line.unavailable = true;
-        names.push(line.name);
+        var matches = o.items.filter(function (l) { return l.id === id; });   // every variant of the item
+        if (!matches.length) throw new AppError('One of the selected items is not in order #' + o.orderNumber + '. Please refresh.');
+        matches.forEach(function (line) { line.unavailable = true; });
+        if (names.indexOf(matches[0].name) === -1) names.push(matches[0].name);
       });
       o.token = newToken_();                             // a new token invalidates older email links
       o.tokenExpiresAt = Date.now() + hours * 3600 * 1000;
@@ -590,14 +651,20 @@ function getHistory(query) {
 
 /** Checks that the signed-in customer may act on this order with this token. */
 function verifyResponse_(o, token, ctx) {
-  if (!o) throw new AppError('We could not find that order.');
-  if (o.customerEmail !== ctx.email) {
+  var invalid = 'This link is not valid. Please use the most recent email from the coffee shop.';
+  if (!o) throw new AppError(invalid);
+  var owner = o.customerEmail === ctx.email;
+  var tokenOk = !!o.token && safeEquals_(o.token, token);
+  // Reveal nothing about an order (not even that it exists) unless the
+  // caller placed it or holds its current secret link.
+  if (!owner && !tokenOk) throw new AppError(invalid);
+  if (!owner) {
     throw new AppError('This link belongs to a different account. Please sign in with the school account that placed order #' + o.orderNumber + '.');
   }
   if (o.status !== CONFIG.STATUS.AWAITING || !o.token) {
     throw new AppError('This link has already been used or is no longer needed. Order #' + o.orderNumber + ' is currently "' + o.status + '".');
   }
-  if (!safeEquals_(o.token, token)) {
+  if (!tokenOk) {
     throw new AppError('This link is out of date. Please use the most recent email about order #' + o.orderNumber + '.');
   }
   if (o.tokenExpiresAt && Date.now() > o.tokenExpiresAt) {
@@ -622,9 +689,7 @@ function getResponseContext(orderNumber, token) {
       room: o.room,
       payment: o.payment,
       unavailable: o.items.filter(function (l) { return l.unavailable; }).map(function (l) { return { id: l.id, name: l.name, qty: l.qty }; }),
-      remaining: remaining.map(function (l) {
-        return { id: l.id, name: l.name, price: l.price, qty: l.qty, lineTotal: centsToAmount_(toCents_(l.price) * l.qty) };
-      }),
+      remaining: remaining.map(function (l) { return lineForClient_(l); }),
       originalTotal: o.total,
       newTotal: centsToAmount_(totalCents_(remaining, true)),
       expiresAt: o.tokenExpiresAt
@@ -636,6 +701,7 @@ function getResponseContext(orderNumber, token) {
 function respondContinue(orderNumber, token) {
   return api_('respondContinue', function () {
     var ctx = requireCustomer_();
+    rateLimit_('respond', ctx.email, 20, 600);
     var tok = parseToken_(token);
     var r = changeOrder_(orderNumber, null, function (o) {
       verifyResponse_(o, tok, ctx);
@@ -653,6 +719,7 @@ function respondContinue(orderNumber, token) {
 function respondCancel(orderNumber, token) {
   return api_('respondCancel', function () {
     var ctx = requireCustomer_();
+    rateLimit_('respond', ctx.email, 20, 600);
     var tok = parseToken_(token);
     var r = changeOrder_(orderNumber, null, function (o) {
       verifyResponse_(o, tok, ctx);
@@ -671,16 +738,20 @@ function respondCancel(orderNumber, token) {
 function submitRevision(orderNumber, token, payload) {
   return api_('submitRevision', function () {
     var ctx = requireCustomer_();
+    rateLimit_('respond', ctx.email, 20, 600);
     var rules = getRules_(ctx);
     var tok = parseToken_(token);
     payload = (payload && typeof payload === 'object') ? payload : {};
     var menuMap = getMenuMap_();
+    var optionMap = getOptionMap_();
     var details = validateDetails_(payload, rules);
 
-    var r = changeOrder_(orderNumber, null, function (o) {
+    var r = changeOrder_(orderNumber, null, function (o, data) {
       verifyResponse_(o, tok, ctx);
+      // Keeping an existing pickup is always allowed; switching TO pickup follows the pickup rules.
+      if (!details.delivery && o.delivery) assertPickupAvailable_(data, rules, o.orderNumber);
       var blocked = o.items.filter(function (l) { return l.unavailable; }).map(function (l) { return l.id; });
-      var lines = buildLines_(payload.items, menuMap, rules, blocked);
+      var lines = buildLines_(payload.items, menuMap, rules, blocked, optionMap);
       o.items = lines;
       o.total = centsToAmount_(totalCents_(lines, true));
       o.customerName = details.name;
@@ -693,6 +764,61 @@ function submitRevision(orderNumber, token, payload) {
     var summary = toCustomerSummary_(r.order);
     summary.emailSent = sendConfirmationEmail_(r.order, 'updated');
     return summary;
+  });
+}
+
+/* =========================================================================
+ *  Pickup limits
+ * ========================================================================= */
+
+/**
+ * Is pickup open right now? Staff can pause it (PICKUP_ENABLED) and it also
+ * pauses automatically while MAX_ACTIVE_PICKUPS pickup orders are waiting.
+ * `data` may be null; orders are then read only if a limit is set.
+ * Returns {enabled, active, max, available, message}.
+ */
+function pickupStatus_(data, rules, excludeOrderNumber) {
+  var s = getSettings_();
+  var max = Math.max(0, Math.floor(Number(s.MAX_ACTIVE_PICKUPS) || 0));
+  var active = 0;
+  if (max > 0 || data) {
+    data = data || loadOrders_();
+    active = data.orders.filter(function (o) {
+      return !o.delivery && o.orderNumber !== excludeOrderNumber && CONFIG.ACTIVE_STATUSES.indexOf(o.status) !== -1;
+    }).length;
+  }
+  var status = { enabled: s.PICKUP_ENABLED === true, active: active, max: max, available: true, message: '' };
+  if (!status.enabled) {
+    status.available = false;
+    status.message = 'Pickup is paused right now.';
+  } else if (max > 0 && active >= max) {
+    status.available = false;
+    status.message = 'Pickup is full right now (' + active + ' orders waiting).';
+  }
+  if (!status.available && rules && rules.deliveryEnabled) status.message += ' Delivery is still available.';
+  return status;
+}
+
+/** Throws a friendly error if a new pickup order cannot be accepted. Caller holds the lock. */
+function assertPickupAvailable_(data, rules, excludeOrderNumber) {
+  var p = pickupStatus_(data, rules, excludeOrderNumber);
+  if (!p.available) {
+    throw new AppError(p.message + (rules.deliveryEnabled ? ' Please choose delivery instead.' : ' Please try again later.'));
+  }
+}
+
+/** Staff: pause or resume pickup orders from the dashboard. */
+function setPickupEnabled(enabled) {
+  return api_('setPickupEnabled', function () {
+    var ctx = requireStaff_();
+    if (enabled !== true && enabled !== false) throw new AppError('Please choose on or off.');
+    var result = withLock_(function () {
+      setSettingValueNoLock_('PICKUP_ENABLED', enabled);
+      touchOrdersVersion_();                 // other tablets refresh and see the new state
+      return pickupStatus_(loadOrders_(), getRules_(ctx));
+    });
+    console.log(ctx.email + ' set pickup ' + (enabled ? 'ON' : 'OFF'));
+    return result;
   });
 }
 

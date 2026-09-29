@@ -100,7 +100,8 @@ const g = {
   },
   CacheService: { getScriptCache: () => ({
     get: k => (cacheMap.has(k) ? cacheMap.get(k) : null), put: (k, v) => cacheMap.set(k, v),
-    removeAll: ks => ks.forEach(k => cacheMap.delete(k))
+    removeAll: ks => ks.forEach(k => cacheMap.delete(k)),
+    remove: k => cacheMap.delete(k)
   }) },
   PropertiesService: { getScriptProperties: () => ({
     getProperty: k => (props.has(k) ? props.get(k) : null), setProperty: (k, v) => props.set(k, String(v))
@@ -113,6 +114,7 @@ const g = {
   ScriptApp: {
     getService: () => ({ getUrl: () => 'https://script.google.com/a/macros/school.org/s/ABC/exec' }),
     getProjectTriggers: () => g.__triggers,
+    AuthMode: { FULL: { toString: () => 'FULL' } },
   },
   HtmlService: {
     createTemplateFromFile: f => { const t = { evaluate: () => ({ file: f, t, favicon: null,
@@ -149,9 +151,12 @@ function as(email) {
   activeEmail = email;
   // per-execution memos must reset between "requests"
   vm.runInContext('ctxMemo_ = null; settingsMemo_ = null; staffMemo_ = null;', g);
+  if (!keepRateLimits) for (const k of [...cacheMap.keys()]) if (k.startsWith('rl_')) cacheMap.delete(k);
 }
+let keepRateLimits = false;
 function ok(res) { assert.ok(res && res.ok, 'expected ok, got ' + JSON.stringify(res)); return res.data; }
 function fail(res, re) {
+  if (!keepRateLimits) for (const k of [...cacheMap.keys()]) if (k.startsWith('rl_')) cacheMap.delete(k);
   assert.ok(res && !res.ok, 'expected failure, got ' + JSON.stringify(res));
   if (re) assert.ok(re.test(res.error), 'error "' + res.error + '" does not match ' + re);
   return res.error;
@@ -193,7 +198,7 @@ test('setup() creates sheets and is owner-only', () => {
   assert.strictEqual(sheets.Menu.getLastRow(), 21);           // 20 starting items + header
   g.setup(); // idempotent
   assert.strictEqual(sheets.Menu.getLastRow(), 21);
-  same(sheets.Menu.data[0], ['ItemID', 'Name', 'Price', 'Available', 'Category', 'SortOrder', 'Icon', 'Tag']);
+  same(sheets.Menu.data[0], ['ItemID', 'Name', 'Price', 'Available', 'Category', 'SortOrder', 'Icon', 'Tag', 'Customizable']);
   assert.strictEqual(sheets.Settings.data.filter(r => r[0] === 'SHOP_NAME').length, 1);
   assert.strictEqual(orderSettings('ALLOWED_DOMAINS'), 'school.org');
   sheets.Staff.appendRow([STAFF, 'Barista', 'Staff']);
@@ -318,7 +323,7 @@ test('dashboard lists active orders oldest first and polls cheaply', () => {
   as(STAFF);
   const b = ok(g.getShopBootstrap());
   assert.strictEqual(b.user.email, STAFF);
-  assert.ok(ok(g.getMenuAdmin()).length === 12);
+  assert.ok(ok(g.getMenuAdmin()).items.length === 12);
   const r = ok(g.getActiveOrders(''));
   assert.strictEqual(r.orders.length, 8);
   same(r.orders.map(o => o.orderNumber), [1, 2, 3, 4, 5, 6, 7, 8]);
@@ -731,6 +736,166 @@ test('favicons: coffee cup for customers, clipboard for the dashboard, never bre
   g.setup();
   assert.strictEqual(sheets.Settings.data.filter(row => row[0] === 'FAVICON_URL').length, 1);
   assert.strictEqual(sheets.Settings.data.find(row => row[0] === 'SHOP_FAVICON_URL')[1], CLIP);
+});
+
+test('drink options: per-cup choices, server pricing, tampering rejected', () => {
+  as(ownerEmail);
+  // A customizable drink in the fixture menu, and a paid syrup
+  sheets.Menu.appendRow(['HOTCOFFEE', 'Hot Coffee', 3, true, 'Coffee', 5, '☕', 'Hot', true]);
+  const O = sheets.Options;
+  same(O.data[0], ['OptionID', 'Group', 'Name', 'Price', 'Available', 'SortOrder']);
+  same(O.data.slice(1).map(r => r[2]), ['Sugar', 'Splenda', 'Honey', 'Half and Half', 'Vanilla', 'Caramel',
+    'Vanilla', 'Vanilla Sugar Free', 'Caramel', 'Caramel Sugar Free', 'Brown Sugar Cinnamon']);
+  O.data.find(r => r[0] === 'SYRUP_VANILLA')[3] = 0.5;
+  as(OTHER_TEACHER);
+  setSetting('MAX_ACTIVE_ORDERS_PER_CUSTOMER', 0);
+  const boot = ok(g.getCustomerBootstrap());
+  assert.strictEqual(boot.menu.find(i => i.id === 'HOTCOFFEE').customizable, true);
+  assert.strictEqual(boot.menu.find(i => i.id === 'LATTE').customizable, false);
+  same([...new Set(boot.options.map(o => o.group))], ['Sweeteners', 'Creamer', 'Syrups']);
+  // 3 coffees: 2 identical (sugar + half&half), 1 with vanilla syrup (+$0.50); options sent in any order
+  const res = ok(g.submitOrder(order({ name: 'Bob', delivery: false, items: [
+    { id: 'HOTCOFFEE', qty: 1, options: ['HALFHALF', 'SUGAR'] },
+    { id: 'HOTCOFFEE', qty: 1, options: ['SUGAR', 'HALFHALF'], price: 0 },
+    { id: 'HOTCOFFEE', qty: 1, options: ['SYRUP_VANILLA'] },
+    { id: 'LATTE', qty: 1 }
+  ] })));
+  assert.strictEqual(res.items.length, 3);                    // identical cups merged
+  assert.strictEqual(res.items[0].qty, 2);
+  same(res.items[0].options.map(o => o.name).sort(), ['Half and Half', 'Sugar']);
+  assert.strictEqual(res.items[1].price, 3.5);                // 3 + 0.50 syrup, from the sheet
+  assert.strictEqual(res.total, 2 * 3 + 3.5 + 3.5);           // coffees + syrup coffee + latte
+  const m = mail[mail.length - 1];
+  assert.match(m.htmlBody, /Hot Coffee \((Half and Half, Sugar|Sugar, Half and Half)\)/);
+  // Dashboard sees the options
+  as(STAFF);
+  const card = ok(g.getActiveOrders('')).orders.find(o => o.orderNumber === res.orderNumber);
+  assert.ok(card.items.some(l => l.options.some(o => o.name === 'Vanilla' && o.group === 'Syrups')));
+  // Tampering: unknown option, duplicate, too many, options on a non-customizable item, non-array
+  as(OTHER_TEACHER);
+  const bad = (items) => g.submitOrder(order({ name: 'Bob', delivery: false, items }));
+  fail(bad([{ id: 'HOTCOFFEE', qty: 1, options: ['<script>'] }]), /no longer offered/);
+  fail(bad([{ id: 'HOTCOFFEE', qty: 1, options: ['SUGAR', 'SUGAR'] }]), /invalid item/);
+  fail(bad([{ id: 'HOTCOFFEE', qty: 1, options: ['SUGAR', 'SPLENDA', 'HONEY', 'HALFHALF', 'CREAM_VANILLA', 'CREAM_CARAMEL', 'SYRUP_VANILLA', 'SYRUP_CARAMEL', 'SYRUP_BSC'] }]), /at most 8/);
+  fail(bad([{ id: 'LATTE', qty: 1, options: ['SUGAR'] }]), /cannot be customized/);
+  fail(bad([{ id: 'HOTCOFFEE', qty: 1, options: 'SUGAR' }]), /invalid item/);
+  fail(bad([{ id: 'HOTCOFFEE', qty: 6, options: ['SUGAR'] }, { id: 'HOTCOFFEE', qty: 5 }]), /at most 10 of Hot Coffee/);
+  // Staff turn Honey off -> rejected, and hidden from customers
+  as(STAFF);
+  ok(g.setOptionAvailability('HONEY', false));
+  fail(g.setOptionAvailability('NOPE', false), /not found/);
+  assert.ok(ok(g.getMenuAdmin()).options.find(o => o.id === 'HONEY').available === false);
+  as(OTHER_TEACHER);
+  assert.ok(!ok(g.getCustomerBootstrap()).options.some(o => o.id === 'HONEY'));
+  fail(bad([{ id: 'HOTCOFFEE', qty: 1, options: ['HONEY'] }]), /Honey is not available/);
+  as(TEACHER);
+  fail(g.setOptionAvailability('HONEY', true), /only for coffee shop staff/);
+  as(STAFF);
+  ok(g.setOptionAvailability('HONEY', true));
+  // Unavailable item flags every variant; revision context keeps options for pre-fill
+  ok(g.markItemsUnavailable(res.orderNumber, ['LATTE'], false));
+  as(OTHER_TEACHER);
+  const tok = orderRow(res.orderNumber).ResponseToken;
+  const ctx = ok(g.getResponseContext(res.orderNumber, tok));
+  assert.strictEqual(ctx.remaining.length, 2);
+  assert.ok(ctx.remaining.every(l => Array.isArray(l.options) && l.options.length));
+  assert.strictEqual(ctx.newTotal, 9.5);
+  as(STAFF);
+  ok(g.markItemsUnavailable(res.orderNumber, ['HOTCOFFEE'], false));
+  const rowItems = JSON.parse(orderRow(res.orderNumber).ItemsJSON);
+  assert.ok(rowItems.filter(l => l.id === 'HOTCOFFEE').every(l => l.unavailable === true));
+  ok(g.cancelOrder(res.orderNumber, 'test'));
+});
+
+test('pickup switch and automatic pickup limit', () => {
+  as(ownerEmail);
+  setSetting('MAX_ACTIVE_ORDERS_PER_CUSTOMER', 0);
+  // Staff pause pickup from the dashboard
+  as(TEACHER);
+  fail(g.setPickupEnabled(false), /only for coffee shop staff/);
+  as(STAFF);
+  fail(g.setPickupEnabled('no'), /on or off/);
+  const st = ok(g.setPickupEnabled(false));
+  assert.strictEqual(st.enabled, false);
+  assert.strictEqual(sheets.Settings.data.find(r => r[0] === 'PICKUP_ENABLED')[1], 'FALSE');
+  const dash = ok(g.getActiveOrders(''));
+  assert.strictEqual(dash.pickup.enabled, false);
+  as(OTHER_TEACHER);
+  let boot = ok(g.getCustomerBootstrap());
+  assert.strictEqual(boot.rules.pickupAvailable, false);
+  assert.strictEqual(boot.orderingOpen, true);                 // delivery still possible
+  fail(g.submitOrder(order({ name: 'Bob', delivery: false })), /Pickup is paused.*choose delivery/);
+  ok(g.submitOrder(order({ name: 'Bob', delivery: true, room: '101' })));
+  // Pickup paused AND delivery off -> ordering closed with a clear message
+  as(ownerEmail);
+  setSetting('DELIVERY_ENABLED', 'FALSE');
+  as(OTHER_TEACHER);
+  boot = ok(g.getCustomerBootstrap());
+  assert.strictEqual(boot.orderingOpen, false);
+  assert.match(boot.closedMessage, /Pickup is paused/);
+  as(ownerEmail);
+  setSetting('DELIVERY_ENABLED', 'TRUE');
+  as(STAFF);
+  ok(g.setPickupEnabled(true));
+  // Automatic cap: count current waiting pickups, allow exactly up to the cap
+  as(STAFF);
+  const waiting = ok(g.getActiveOrders('')).pickup.active;
+  as(ownerEmail);
+  setSetting('MAX_ACTIVE_PICKUPS', waiting + 1);
+  as(OTHER_TEACHER);
+  const last = ok(g.submitOrder(order({ name: 'Bob', delivery: false })));
+  fail(g.submitOrder(order({ name: 'Bob', delivery: false })), /Pickup is full right now/);
+  assert.strictEqual(ok(g.getCustomerBootstrap()).rules.pickupAvailable, false);
+  as(STAFF);
+  ok(g.completeOrder(last.orderNumber));                       // a slot opens up
+  as(OTHER_TEACHER);
+  ok(g.submitOrder(order({ name: 'Bob', delivery: false })));
+  as(ownerEmail);
+  setSetting('MAX_ACTIVE_PICKUPS', 0);
+});
+
+test('rate limit stops scripted order spam', () => {
+  as(OTHER_TEACHER);
+  keepRateLimits = true;
+  try {
+    let limited = false;
+    for (let i = 0; i < 20 && !limited; i++) {
+      const r = g.submitOrder({ items: [] });
+      if (/too often/.test(r.error || '')) limited = true;
+    }
+    assert.ok(limited, 'expected the rate limit to kick in');
+  } finally {
+    keepRateLimits = false;
+    as(OTHER_TEACHER);
+  }
+});
+
+test('security: special IDs never match built-in properties; trigger events cannot be forged', () => {
+  as(TEACHER);
+  for (const id of ['constructor', '__proto__', 'toString', 'hasOwnProperty']) {
+    fail(g.submitOrder(order({ items: [{ id, qty: 1 }] })), /no longer on the menu/);
+    fail(g.submitOrder(order({ delivery: false, items: [{ id: 'HOTCOFFEE', qty: 1, options: [id] }] })), /no longer offered/);
+  }
+  as(ownerEmail);
+  g.__triggers.push({ getUniqueId: () => '12345', getHandlerFunction: () => 'archiveOldOrders' });
+  as(TEACHER);
+  // A browser can send the right trigger ID, but not Google's AuthMode object
+  assert.throws(() => g.archiveOldOrders({ triggerUid: '12345', authMode: 'FULL' }), /owner/);
+  assert.throws(() => g.autoCancelStaleOrders({ triggerUid: '12345', authMode: { toString: () => 'FULL' } }), /owner/);
+  // A genuine trigger event is accepted
+  as('');
+  const res = g.archiveOldOrders({ triggerUid: '12345', authMode: g.ScriptApp.AuthMode.FULL });
+  assert.ok(typeof res.moved === 'number');
+  g.__triggers.length = 0;
+});
+
+test('security: response links do not reveal whether other orders exist', () => {
+  as(OTHER_TEACHER);
+  const fake = 'b'.repeat(64);
+  const a = g.getResponseContext(1, fake).error;      // exists, someone else's
+  const b = g.getResponseContext(999999, fake).error; // does not exist
+  assert.strictEqual(a, b);
+  assert.match(a, /not valid/);
 });
 
 test('Orders sheet grows past its row limit without errors', () => {

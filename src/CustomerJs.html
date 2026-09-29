@@ -24,6 +24,8 @@
     menuById: {},
     blocked: {},           // item ids that may not be re-added during a revision
     cart: {},              // id -> qty
+    custom: {},            // id -> [[optionId...] per cup] for customizable drinks
+    optionById: {},
     step: 'menu',
     delivery: null,
     room: '',
@@ -64,6 +66,14 @@
     App.setCurrency(data.currency);
     S.menuById = {};
     data.menu.forEach(function (it) { S.menuById[it.id] = it; });
+    S.optionById = {};
+    S.optionGroups = [];
+    (data.options || []).forEach(function (o) {
+      S.optionById[o.id] = o;
+      var g = S.optionGroups.filter(function (x) { return x.name === o.group; })[0];
+      if (!g) { g = { name: o.group, options: [] }; S.optionGroups.push(g); }
+      g.options.push(o);
+    });
     document.getElementById('userEmail').textContent = data.user.email;
     var link = document.getElementById('shopLink');
     if (data.user.isShopStaff && BOOT.baseUrl) {
@@ -110,10 +120,52 @@
 
   /* ---------------- cart ---------------- */
 
+  /**
+   * Cart as order lines. Customizable drinks are split by their options:
+   * two coffees with sugar and one with vanilla syrup become two lines.
+   * Prices here are for display only; the server recalculates everything.
+   */
   function cartLines() {
-    return S.data.menu.filter(function (it) { return S.cart[it.id] > 0; }).map(function (it) {
-      return { id: it.id, name: it.name, icon: it.icon, price: it.price, qty: S.cart[it.id] };
+    var lines = [];
+    S.data.menu.forEach(function (it) {
+      var q = S.cart[it.id] || 0;
+      if (!q) return;
+      if (!it.customizable) {
+        lines.push({ id: it.id, name: it.name, icon: it.icon, price: it.price, qty: q, options: [] });
+        return;
+      }
+      var byKey = {};
+      var keys = [];
+      cupsFor(it.id).forEach(function (ids) {
+        var sorted = ids.slice().sort();
+        var key = sorted.join(',');
+        if (!byKey[key]) {
+          var opts = sorted.map(function (oid) { return S.optionById[oid]; });
+          var cents = App.cents(it.price) + opts.reduce(function (c, o) { return c + App.cents(o.price); }, 0);
+          byKey[key] = { id: it.id, name: it.name, icon: it.icon, price: cents / 100, qty: 0, options: opts };
+          keys.push(key);
+        }
+        byKey[key].qty++;
+      });
+      keys.forEach(function (k) { lines.push(byKey[k]); });
     });
+    return lines;
+  }
+
+  /** Per-cup option choices for a drink, kept in step with its quantity. */
+  function cupsFor(id) {
+    var q = S.cart[id] || 0;
+    var cups = (S.custom[id] || []).map(function (ids) {
+      return ids.filter(function (oid) { return S.optionById[oid]; });   // drop options no longer offered
+    });
+    while (cups.length < q) cups.push([]);
+    cups.length = q;
+    S.custom[id] = cups;
+    return cups;
+  }
+
+  function customizableInCart() {
+    return S.data.menu.filter(function (it) { return it.customizable && S.cart[it.id] > 0; });
   }
   function cartQty() {
     return Object.keys(S.cart).reduce(function (n, id) { return n + (S.cart[id] || 0); }, 0);
@@ -180,8 +232,90 @@
 
   document.getElementById('cartContinue').addEventListener('click', function () {
     if (cartQty() === 0) { App.toast('Please add at least one item.', 'error'); return; }
-    go('delivery');
+    if (customizableInCart().length) {
+      openCustomizer().then(function (done) { if (done) go('delivery'); });
+    } else {
+      go('delivery');
+    }
   });
+
+  /* ---------------- drink options popup ---------------- */
+
+  /**
+   * Popup to choose sweeteners, creamers and syrups for each customizable
+   * drink in the cart, one cup at a time. Resolves true when the customer
+   * taps Continue, false if they go back.
+   */
+  function openCustomizer() {
+    var drinks = customizableInCart();
+    var max = S.data.rules.maxOptionsPerItem || 8;
+    var cupBoxes = [];            // [{id, boxes:[checkbox...]}]
+
+    function cupSection(it, cupIndex, count, chosen) {
+      var boxes = [];
+      var title = it.name + (count > 1 ? ' — cup ' + (cupIndex + 1) + ' of ' + count : '');
+      var section = h('section', { class: 'cup', 'aria-label': title },
+        h('h3', { class: 'cup-title' }, h('span', { 'aria-hidden': 'true' }, (it.icon || '') + ' '), title),
+        S.optionGroups.map(function (g) {
+          return h('fieldset', { class: 'opt-group' },
+            h('legend', null, g.name),
+            h('div', { class: 'opt-chips' }, g.options.map(function (o) {
+              var box = h('input', { type: 'checkbox', value: o.id, checked: chosen.indexOf(o.id) !== -1,
+                'aria-label': g.name + ': ' + o.name + ' for ' + title,
+                onchange: function (e) {
+                  var n = boxes.filter(function (b) { return b.checked; }).length;
+                  if (n > max) { e.target.checked = false; App.toast('Up to ' + max + ' options per drink.', 'error'); }
+                } });
+              boxes.push(box);
+              return h('label', { class: 'opt-chip' }, box,
+                h('span', null, o.name, o.price > 0 ? h('small', null, ' +' + App.money(o.price)) : null));
+            })));
+        }));
+      cupBoxes.push({ id: it.id, boxes: boxes });
+      return { el: section, boxes: boxes };
+    }
+
+    var body = h('div', { class: 'customizer' },
+      h('p', { class: 'hint', style: 'margin-top:0' }, 'Choose how you like each drink. Leave everything unticked for none.'));
+    drinks.forEach(function (it) {
+      var cups = cupsFor(it.id);
+      var first = null;
+      cups.forEach(function (chosen, i) {
+        var sec = cupSection(it, i, cups.length, chosen);
+        body.appendChild(sec.el);
+        if (i === 0) {
+          first = sec;
+          if (cups.length > 1) {
+            sec.el.appendChild(h('button', { type: 'button', class: 'btn small', onclick: function () {
+              var picked = first.boxes.filter(function (b) { return b.checked; }).map(function (b) { return b.value; });
+              cupBoxes.filter(function (c) { return c.id === it.id; }).forEach(function (c) {
+                c.boxes.forEach(function (b) { b.checked = picked.indexOf(b.value) !== -1; });
+              });
+              App.toast('Copied to all ' + cups.length + ' ' + it.name + ' cups', 'ok');
+            } }, 'Same for all ' + cups.length + ' cups'));
+          }
+        }
+      });
+    });
+
+    return App.modal({
+      title: 'Customize your drinks',
+      body: body,
+      buttons: [
+        { label: 'Back', class: 'btn', value: null },
+        { label: 'Continue', class: 'btn primary', value: 'done' }
+      ]
+    }).then(function (v) {
+      if (v !== 'done') return false;
+      var next = {};
+      cupBoxes.forEach(function (c) {
+        (next[c.id] = next[c.id] || []).push(c.boxes.filter(function (b) { return b.checked; }).map(function (b) { return b.value; }));
+      });
+      Object.keys(next).forEach(function (id) { S.custom[id] = next[id]; });
+      updateCartBar();
+      return true;
+    });
+  }
 
   /* ---------------- step 1: menu ---------------- */
 
@@ -332,9 +466,22 @@
     return re.test(r) ? '' : 'Please enter a valid room number (for example 214 or B12).';
   }
 
+  /** Pickup is allowed if the shop has it open, or if a revision keeps an existing pickup. */
+  function pickupAllowed() {
+    return S.data.rules.pickupAvailable || (S.mode === 'revise' && S.respond && S.respond.delivery === false);
+  }
+
   function renderDelivery() {
     var rules = S.data.rules;
     var body;
+    if (!rules.deliveryEnabled && !pickupAllowed()) {
+      body = h('div', { class: 'panel' },
+        h('h2', null, 'Pickup is paused'),
+        h('p', null, (rules.pickupMessage || 'Pickup is paused right now.') + ' Delivery is not available either, so the shop cannot take this order right now. Please try again soon.'),
+        h('button', { type: 'button', class: 'btn', onclick: function () { go('menu'); } }, 'Back'));
+      App.clear(app).appendChild(h('div', null, stepsNav(), reviseBanner(), body));
+      return;
+    }
     if (!rules.deliveryEnabled) {
       S.delivery = false;
       S.room = '';
@@ -361,6 +508,11 @@
     var roomBox = h('div', { hidden: S.delivery !== true },
       h('label', { for: 'room' }, 'Room number'), roomInput, h('div', { class: 'hint', id: 'roomHint', text: hint }), err);
     var choiceErr = h('div', { class: 'field-error', role: 'alert' });
+    var pickupOk = pickupAllowed();
+    if (!pickupOk) {                                   // delivery only right now
+      S.delivery = true;
+      roomBox.hidden = false;
+    }
 
     function choice(value, label) {
       return h('label', { class: 'choice' },
@@ -381,10 +533,14 @@
       }
       go('payment');
     } },
-      h('fieldset', null,
-        h('legend', null, h('h2', { style: 'margin:0' }, 'Would you like delivery?')),
-        h('div', { class: 'choices' }, choice(true, 'Yes, deliver to my room'), choice(false, 'No, I\'ll pick it up')),
-        choiceErr),
+      pickupOk
+        ? h('fieldset', null,
+            h('legend', null, h('h2', { style: 'margin:0' }, 'Would you like delivery?')),
+            h('div', { class: 'choices' }, choice(true, 'Yes, deliver to my room'), choice(false, 'No, I\'ll pick it up')),
+            choiceErr)
+        : h('div', null,
+            h('h2', null, 'Delivery to your room'),
+            h('div', { class: 'alert info' }, (rules.pickupMessage || 'Pickup is paused right now.') + ' We\'ll bring your order to you.')),
       roomBox,
       h('div', { class: 'row', style: 'margin-top:16px' },
         h('button', { type: 'button', class: 'btn', onclick: function () { go('menu'); } }, 'Back'),
@@ -429,7 +585,8 @@
       h('tbody', null,
         lines.map(function (l) {
           return h('tr', null,
-            h('td', null, iconFor(l) ? h('span', { class: 'line-icon', 'aria-hidden': 'true' }, iconFor(l)) : null, l.qty + ' × ' + l.name),
+            h('td', null, iconFor(l) ? h('span', { class: 'line-icon', 'aria-hidden': 'true' }, iconFor(l)) : null, l.qty + ' × ' + l.name,
+              (l.options && l.options.length) ? h('div', { class: 'line-opts' }, l.options.map(function (o) { return o.name; }).join(', ')) : null),
             h('td', { class: 'num' }, App.money(App.cents(l.price) * l.qty / 100)));
         }),
         h('tr', { class: 'total' }, h('td', null, 'Total'), h('td', { class: 'num' }, App.money(total)))));
@@ -464,7 +621,12 @@
     } },
       h('h2', null, S.mode === 'revise' ? 'Review your updated order' : 'Review your order'),
       summaryTable(lines, cartTotal()),
-      h('div', { class: 'row' }, editBtn('Change items', 'menu')),
+      h('div', { class: 'row' }, editBtn('Change items', 'menu'),
+        customizableInCart().length
+          ? h('button', { type: 'button', class: 'btn linklike small', onclick: function () {
+              openCustomizer().then(function (done) { if (done) renderReview(); });
+            } }, 'Change drink options')
+          : null),
       h('dl', { class: 'kv' },
         h('dt', null, 'Delivery'), h('dd', null, S.delivery ? 'Yes — Room ' + S.room : 'No — pickup', ' ', editBtn('Change', 'delivery')),
         h('dt', null, 'Payment'), h('dd', null, S.payment, ' ', editBtn('Change', 'payment'))),
@@ -484,7 +646,9 @@
     errBox.hidden = true;
 
     var payload = {
-      items: cartLines().map(function (l) { return { id: l.id, qty: l.qty }; }),
+      items: cartLines().map(function (l) {
+        return { id: l.id, qty: l.qty, options: l.options.map(function (o) { return o.id; }) };
+      }),
       name: S.name.replace(/\s+/g, ' ').trim(),
       delivery: S.delivery === true,
       room: S.delivery ? S.room : '',
@@ -507,7 +671,7 @@
       errBox.textContent = err.message;
       errBox.hidden = false;
       errBox.scrollIntoView({ block: 'center' });
-      if (/not available|no longer on the menu/i.test(err.message)) refreshMenu();
+      if (/not available|no longer on the menu|no longer offered|cannot be customized|pickup/i.test(err.message)) refreshMenu();
     });
   }
 
@@ -548,6 +712,7 @@
 
   function resetOrder() {
     S.cart = {};
+    S.custom = {};
     S.delivery = null;
     S.room = '';
     S.payment = '';
@@ -572,12 +737,26 @@
     S.blocked = {};
     r.unavailable.forEach(function (u) { S.blocked[u.id] = true; });
     S.cart = {};
+    S.custom = {};
     var missing = [];
+    var droppedOptions = [];
     r.remaining.forEach(function (l) {
-      if (S.menuById[l.id]) S.cart[l.id] = Math.min(l.qty, S.data.rules.maxQtyPerItem);
-      else missing.push(l.name);
+      var it = S.menuById[l.id];
+      if (!it) { missing.push(l.name); return; }
+      var room = S.data.rules.maxQtyPerItem - (S.cart[l.id] || 0);
+      var q = Math.min(l.qty, room);
+      if (q <= 0) return;
+      S.cart[l.id] = (S.cart[l.id] || 0) + q;
+      if (it.customizable) {
+        var ids = (l.options || []).map(function (o) {
+          if (!S.optionById[o.id] && droppedOptions.indexOf(o.name) === -1) droppedOptions.push(o.name);
+          return o.id;
+        }).filter(function (oid) { return S.optionById[oid]; });
+        for (var i = 0; i < q; i++) (S.custom[l.id] = S.custom[l.id] || []).push(ids.slice());
+      }
     });
-    S.notice = missing.length ? 'Also no longer on the menu: ' + missing.join(', ') + '.' : '';
+    S.notice = (missing.length ? 'Also no longer on the menu: ' + missing.join(', ') + '. ' : '') +
+      (droppedOptions.length ? 'No longer offered: ' + droppedOptions.join(', ') + '.' : '');
     S.delivery = S.data.rules.deliveryEnabled ? r.delivery : false;
     S.room = r.room || '';
     S.payment = r.payment || '';

@@ -67,14 +67,20 @@ Run `npm test` (Node.js 18+; no packages to install). It runs two checks:
 | Check | What it does |
 |---|---|
 | `tests/check.js` | Confirms every file parses and the manifest keeps its security settings. It is also a **security guard**: it fails if any browser-callable server function lacks an access check. |
-| `tests/simulate.js` | Runs the real server code against in-memory stand-ins for the Google services. It covers 29 groups of flows: ordering, duplicates, concurrency, unavailable items, links, students, the health check, archiving, cache failures and more. |
+| `tests/simulate.js` | Runs the real server code against in-memory stand-ins for the Google services. It covers 34 groups of flows: ordering, duplicates, concurrency, unavailable items, links, students, the health check, archiving, cache failures and more. |
 
 `.github/workflows/test.yml` runs `npm test` on every push and pull request. [CHANGELOG.md](CHANGELOG.md) lists what changed in each version.
 
 ## Security summary
 
 - **Access checks.** Every browser-callable function starts with `requireCustomer_()` or `requireStaff_()`. These read `Session.getActiveUser()`, check the email domain and check the Staff sheet. Admin functions (`setup`, `archiveOldOrders`…) refuse to run for anyone except the owner or a real installed trigger.
-- **Prices.** Prices and totals are calculated only on the server, from the Menu sheet.
+- **Prices.** Prices and totals are calculated only on the server, from the Menu and Options sheets. Drink options are checked against the Options sheet: the option exists and is available, the item is customizable, no duplicates, at most 8.
+- **Least privilege.** The script can open **only its own spreadsheet** (`spreadsheets.currentonly`), not the owner's other files. `tests/check.js` fails if a broader permission is added.
+- **Hardened lookups.** IDs sent by a browser are looked up in dictionaries without built-in properties, so names such as `constructor` or `__proto__` can never match anything.
+- **Trigger-only jobs.** The archive and auto-cancel jobs accept a trigger event only when it carries Google's own `AuthMode` object, which a browser cannot forge, plus the ID of an installed trigger.
+- **Rate limits.** Per-user limits on placing orders (15 per 10 minutes), answering email links (20 per 10 minutes) and loading the page (60 per 10 minutes) stop scripted abuse of the Sheet and the email quota.
+- **No existence leaks.** Email-link errors for someone else's order are identical to those for an order that doesn't exist.
+- **Pickup limits.** Enforced inside the order lock, so a cap can't be exceeded by simultaneous orders.
 - **Locking.** Order creation and all status changes run inside `LockService`. Order numbers come from a counter that never goes backwards, even after archiving.
 - **Input checks.**
   - Quantities must be whole numbers within the limits.
@@ -84,7 +90,27 @@ Run `npm test` (Node.js 18+; no packages to install). It runs two checks:
 - **Safe display.** The browser shows all text with `textContent`, and emails escape HTML.
 - **Double-submit protection.** The button is disabled while submitting. A per-attempt `requestId` also makes a retry return the same order instead of creating a duplicate.
 - **Errors.** Unexpected errors are logged to the **Errors** sheet, and `ADMIN_ALERT_EMAIL` gets at most one alert email per hour. Users only ever see a friendly message.
-- **Guarded against regressions.** `tests/check.js` fails the build if a new browser-callable function forgets its access check.
+- **Guarded against regressions.** `tests/check.js` fails the build if:
+  - a new browser-callable function forgets its access check
+  - browser code uses `innerHTML`/`eval`-style code
+  - a template prints unescaped data
+  - the manifest asks for broader permissions
+
+### Security review (1.3.0)
+
+| Area checked | Result |
+|---|---|
+| Access control on all 30 browser-callable functions, both pages and email links | Pass (automated guard + tests) |
+| HTML/script injection (customer names, notes, menu/option names, emails, templates) | Pass: text-only rendering, escaped emails and templates |
+| Price and total tampering (items, quantities, options) | Pass: server-side pricing |
+| Sheet formula injection | Pass: user text is neutralised before it is written |
+| Email-link security (secret, single-use, expiring, owner-bound) | Pass |
+| **Fixed:** browser IDs such as `constructor` / `__proto__` matched built-in object properties | Null-prototype lookup tables |
+| **Fixed:** maintenance jobs could be triggered with a forged event if the trigger ID was known | Require Google's `AuthMode` object |
+| **Fixed:** response-link errors revealed whether an order number exists | Uniform error |
+| **Fixed:** the script had access to all of the owner's spreadsheets | Narrowed to the current spreadsheet |
+| **Fixed:** no protection against scripted spam of orders or link actions | Per-user rate limits |
+| **Accepted limits** | Apps Script doesn't let apps set their own security headers; Google's framing protection is left on. Staff-role changes take up to 60 seconds (cache) unless **Clear settings cache** is used. |
 
 ## Production operations
 

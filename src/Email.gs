@@ -48,7 +48,7 @@ function emailShell_(heading, innerHtml) {
 
 function itemsTableHtml_(lines, total) {
   var rows = lines.map(function (l) {
-    return '<tr><td style="padding:6px 8px;border-bottom:1px solid #eee;">' + esc_(l.qty) + ' &times; ' + esc_(l.name) + '</td>' +
+    return '<tr><td style="padding:6px 8px;border-bottom:1px solid #eee;">' + esc_(l.qty) + ' &times; ' + esc_(lineLabel_(l)) + '</td>' +
       '<td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;">' + esc_(formatMoney_(centsToAmount_(toCents_(l.price) * l.qty))) + '</td></tr>';
   }).join('');
   return '<table style="border-collapse:collapse;width:100%;margin:8px 0;">' + rows +
@@ -57,7 +57,7 @@ function itemsTableHtml_(lines, total) {
 
 function itemsText_(lines, total) {
   return lines.map(function (l) {
-    return '  ' + l.qty + ' x ' + l.name + '  ' + formatMoney_(centsToAmount_(toCents_(l.price) * l.qty));
+    return '  ' + l.qty + ' x ' + lineLabel_(l) + '  ' + formatMoney_(centsToAmount_(toCents_(l.price) * l.qty));
   }).join('\n') + '\n  Total: ' + formatMoney_(total);
 }
 
@@ -106,7 +106,8 @@ function sendUnavailableEmail_(o) {
     var gone = o.items.filter(function (l) { return l.unavailable; });
     var remaining = o.items.filter(function (l) { return !l.unavailable; });
     var newTotal = centsToAmount_(totalCents_(remaining, true));
-    var goneNames = gone.map(function (l) { return l.name; });
+    var goneNames = [];
+    gone.forEach(function (l) { if (goneNames.indexOf(l.name) === -1) goneNames.push(l.name); });
     var subjectNames = goneNames.length === 1 ? goneNames[0] + ' is' : goneNames.join(', ') + ' are';
     var heading = subjectNames + ' no longer available';
     var expires = formatDateTime_(o.tokenExpiresAt);

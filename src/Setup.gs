@@ -11,45 +11,100 @@
  */
 
 var SAMPLE_MENU_ = [
-  // ItemID, Name, Price, Available, Category, SortOrder, Icon, Tag
-  ['COKE', 'Coca Cola', 1, true, 'Drinks', 10, '🥤', ''],
-  ['DIETCOKE', 'Diet Coke', 1, true, 'Drinks', 20, '🥤', ''],
-  ['SPRITE', 'Sprite', 1, true, 'Drinks', 30, '🍋', ''],
-  ['DIETDRPEPPER', 'Diet Dr Pepper', 1, true, 'Drinks', 40, '🥤', ''],
-  ['GATORADE', 'Gatorade', 2, true, 'Drinks', 50, '🏅', ''],
-  ['HOTTEA', 'Hot Tea', 2, true, 'Drinks', 60, '🍵', 'Hot'],
-  ['ALANINU', 'Alani Nu', 3, true, 'Drinks', 70, '⚡', ''],
-  ['POPPI', 'Poppi', 3, true, 'Drinks', 80, '🍹', ''],
-  ['PROTEIN', 'Protein Shake', 3, true, 'Drinks', 90, '💪', ''],
-  ['HOTCHOC', 'Hot Chocolate', 3, true, 'Drinks', 100, '🍫', 'Hot'],
-  ['HOTCOFFEE', 'Hot Coffee', 3, true, 'Drinks', 110, '☕', 'Hot'],
-  ['ICEDCOFFEE', 'Iced Coffee', 3, true, 'Drinks', 120, '🧊', 'Iced'],
-  ['TAKIS', 'Takis', 1, true, 'Snacks', 210, '🌶️', 'Spicy'],
-  ['LAYS', 'Lays', 1, true, 'Snacks', 220, '🥔', ''],
-  ['DORITOS', 'Doritos', 1, true, 'Snacks', 230, '🧀', ''],
-  ['SPARTAN', 'Spartan Special', 1, true, 'Snacks', 240, '🛡️', 'Special'],
-  ['HONEYBUN', 'Honey Bun', 2, true, 'Snacks', 250, '🍯', ''],
-  ['FUDGESTRIPES', 'Fudge Stripes', 2, true, 'Snacks', 260, '🍪', ''],
-  ['MUFFIN', 'Muffins', 2, true, 'Snacks', 270, '🧁', ''],
-  ['SEASONAL', 'Seasonal Treat', 2, true, 'Snacks', 280, '✨', 'Seasonal']
+  // ItemID, Name, Price, Available, Category, SortOrder, Icon, Tag, Customizable
+  ['COKE', 'Coca Cola', 1, true, 'Drinks', 10, '🥤', '', false],
+  ['DIETCOKE', 'Diet Coke', 1, true, 'Drinks', 20, '🥤', '', false],
+  ['SPRITE', 'Sprite', 1, true, 'Drinks', 30, '🍋', '', false],
+  ['DIETDRPEPPER', 'Diet Dr Pepper', 1, true, 'Drinks', 40, '🥤', '', false],
+  ['GATORADE', 'Gatorade', 2, true, 'Drinks', 50, '🏅', '', false],
+  ['HOTTEA', 'Hot Tea', 2, true, 'Drinks', 60, '🍵', 'Hot', true],
+  ['ALANINU', 'Alani Nu', 3, true, 'Drinks', 70, '⚡', '', false],
+  ['POPPI', 'Poppi', 3, true, 'Drinks', 80, '🍹', '', false],
+  ['PROTEIN', 'Protein Shake', 3, true, 'Drinks', 90, '💪', '', false],
+  ['HOTCHOC', 'Hot Chocolate', 3, true, 'Drinks', 100, '🍫', 'Hot', true],
+  ['HOTCOFFEE', 'Hot Coffee', 3, true, 'Drinks', 110, '☕', 'Hot', true],
+  ['ICEDCOFFEE', 'Iced Coffee', 3, true, 'Drinks', 120, '🧊', 'Iced', true],
+  ['TAKIS', 'Takis', 1, true, 'Snacks', 210, '🌶️', 'Spicy', false],
+  ['LAYS', 'Lays', 1, true, 'Snacks', 220, '🥔', '', false],
+  ['DORITOS', 'Doritos', 1, true, 'Snacks', 230, '🧀', '', false],
+  ['SPARTAN', 'Spartan Special', 1, true, 'Snacks', 240, '🛡️', 'Special', false],
+  ['HONEYBUN', 'Honey Bun', 2, true, 'Snacks', 250, '🍯', '', false],
+  ['FUDGESTRIPES', 'Fudge Stripes', 2, true, 'Snacks', 260, '🍪', '', false],
+  ['MUFFIN', 'Muffins', 2, true, 'Snacks', 270, '🧁', '', false],
+  ['SEASONAL', 'Seasonal Treat', 2, true, 'Snacks', 280, '✨', 'Seasonal', false]
 ];
+
+/** Drink options offered for Customizable items. Price is extra per drink (0 = free). */
+var SAMPLE_OPTIONS_ = [
+  // OptionID, Group, Name, Price, Available, SortOrder
+  ['SUGAR', 'Sweeteners', 'Sugar', 0, true, 10],
+  ['SPLENDA', 'Sweeteners', 'Splenda', 0, true, 20],
+  ['HONEY', 'Sweeteners', 'Honey', 0, true, 30],
+  ['HALFHALF', 'Creamer', 'Half and Half', 0, true, 110],
+  ['CREAM_VANILLA', 'Creamer', 'Vanilla', 0, true, 120],
+  ['CREAM_CARAMEL', 'Creamer', 'Caramel', 0, true, 130],
+  ['SYRUP_VANILLA', 'Syrups', 'Vanilla', 0, true, 210],
+  ['SYRUP_VANILLA_SF', 'Syrups', 'Vanilla Sugar Free', 0, true, 220],
+  ['SYRUP_CARAMEL', 'Syrups', 'Caramel', 0, true, 230],
+  ['SYRUP_CARAMEL_SF', 'Syrups', 'Caramel Sugar Free', 0, true, 240],
+  ['SYRUP_BSC', 'Syrups', 'Brown Sugar Cinnamon', 0, true, 250]
+];
+
+/** Items ticked Customizable when the column is first added to an existing Menu. */
+var DEFAULT_CUSTOMIZABLE_ = ['HOTCOFFEE', 'HOTTEA', 'ICEDCOFFEE', 'HOTCHOC'];
+
+/** Appends rows (given in CONFIG header order) under the matching header names. */
+function writeRowsByHeader_(sheet, headers, rows) {
+  var idx = headerIndex_(sheet);
+  var width = sheet.getLastColumn();
+  var out = rows.map(function (r) {
+    var line = [];
+    for (var c = 0; c < width; c++) line.push('');
+    headers.forEach(function (h, i) { if (idx.hasOwnProperty(h)) line[idx[h]] = r[i]; });
+    return line;
+  });
+  var start = sheet.getLastRow() + 1;
+  ensureRows_(sheet, start + out.length - 1);
+  sheet.getRange(start, 1, out.length, width).setValues(out);
+}
 
 function setup() {
   requireOwner_();
   var ss = getSs_();
-  PropertiesService.getScriptProperties().setProperty('SPREADSHEET_ID', ss.getId());
   var owner = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
   var ownerDomain = owner.split('@')[1] || '';
 
   // --- Menu ---
+  var existingMenu = ss.getSheetByName(CONFIG.SHEETS.MENU);
+  var hadCustomizable = !!existingMenu && existingMenu.getLastColumn() > 0 &&
+    headerIndex_(existingMenu).hasOwnProperty('Customizable');
   var menu = ensureSheet_(ss, CONFIG.SHEETS.MENU, CONFIG.HEADERS.MENU);
   if (menu.getLastRow() < 2) {
-    menu.getRange(2, 1, SAMPLE_MENU_.length, SAMPLE_MENU_[0].length).setValues(SAMPLE_MENU_);
+    writeRowsByHeader_(menu, CONFIG.HEADERS.MENU, SAMPLE_MENU_);
+  } else if (!hadCustomizable) {
+    // Upgrading an existing menu: tick Customizable for the standard hot/iced drinks.
+    var mi = headerIndex_(menu);
+    var ids = menu.getRange(2, mi.ItemID + 1, menu.getLastRow() - 1, 1).getValues();
+    menu.getRange(2, mi.Customizable + 1, ids.length, 1).setValues(ids.map(function (r) {
+      return [DEFAULT_CUSTOMIZABLE_.indexOf(String(r[0]).trim()) !== -1];
+    }));
   }
   var mIdx = headerIndex_(menu);
   var menuRows = Math.max(menu.getMaxRows() - 1, 1);
-  menu.getRange(2, mIdx.Available + 1, menuRows, 1)
+  ['Available', 'Customizable'].forEach(function (h) {
+    menu.getRange(2, mIdx[h] + 1, menuRows, 1)
+      .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build());
+  });
+
+  // --- Options (sweeteners, creamers, syrups) ---
+  var options = ensureSheet_(ss, CONFIG.SHEETS.OPTIONS, CONFIG.HEADERS.OPTIONS);
+  if (options.getLastRow() < 2) writeRowsByHeader_(options, CONFIG.HEADERS.OPTIONS, SAMPLE_OPTIONS_);
+  var opIdx = headerIndex_(options);
+  var opRows = Math.max(options.getMaxRows() - 1, 1);
+  options.getRange(2, opIdx.Available + 1, opRows, 1)
     .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build());
+  options.getRange(2, opIdx.Price + 1, opRows, 1).setNumberFormat('$0.00');
+  options.getRange(2, opIdx.OptionID + 1, opRows, 1).setNumberFormat('@');
   menu.getRange(2, mIdx.Price + 1, menuRows, 1).setNumberFormat('$0.00');
   menu.getRange(2, mIdx.ItemID + 1, menuRows, 1).setNumberFormat('@');
 
@@ -211,6 +266,7 @@ function checkSetup() {
   required[CONFIG.SHEETS.ORDERS] = CONFIG.HEADERS.ORDERS;
   required[CONFIG.SHEETS.STAFF] = CONFIG.HEADERS.STAFF;
   required[CONFIG.SHEETS.SETTINGS] = CONFIG.HEADERS.SETTINGS;
+  required[CONFIG.SHEETS.OPTIONS] = CONFIG.HEADERS.OPTIONS;
   required[CONFIG.SHEETS.ERRORS] = CONFIG.HEADERS.ERRORS;
   var sheetsOk = true;
   Object.keys(required).forEach(function (name) {
@@ -266,6 +322,16 @@ function checkSetup() {
   if (nonBlank > menu.length) warnings.push((nonBlank - menu.length) + ' Menu row(s) are skipped because of a missing ItemID/Name, an invalid Price, or a duplicate ItemID.');
   if (!available) errors.push('No menu items are marked Available, so customers will see an empty menu.');
   info.push(menu.length + ' menu item(s), ' + available + ' available.');
+  var opts = readOptions_();
+  var custom = menu.filter(function (it) { return it.customizable; }).length;
+  if (custom && !opts.some(function (o) { return o.available; })) {
+    warnings.push(custom + ' item(s) are Customizable but no drink options are available in the Options tab, so no options popup will appear.');
+  }
+  info.push(custom + ' customizable drink(s); ' + opts.length + ' drink option(s), ' + opts.filter(function (o) { return o.available; }).length + ' available.');
+  if (!s.PICKUP_ENABLED) {
+    warnings.push('PICKUP_ENABLED is FALSE: pickup is paused' + (s.DELIVERY_ENABLED ? ' (delivery only).' : ' and delivery is off, so nobody can order.'));
+  }
+
 
   // 4. Settings values
   try { new RegExp(s.ROOM_PATTERN); } catch (e) { errors.push('Settings > ROOM_PATTERN is not a valid pattern; the default is being used.'); }
