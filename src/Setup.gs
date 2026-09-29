@@ -52,6 +52,13 @@ var SAMPLE_OPTIONS_ = [
 
 /** Items ticked Customizable when the column is first added to an existing Menu. */
 var DEFAULT_CUSTOMIZABLE_ = ['HOTCOFFEE', 'HOTTEA', 'ICEDCOFFEE', 'HOTCHOC'];
+var DEFAULT_CUSTOMIZABLE_NAMES_ = ['hot coffee', 'hot tea', 'iced coffee', 'hot chocolate'];
+
+/** Is this one of the standard drinks that get the options popup (by ID or name)? */
+function isDefaultCustomizable_(id, name) {
+  return DEFAULT_CUSTOMIZABLE_.indexOf(String(id || '').trim().toUpperCase()) !== -1 ||
+    DEFAULT_CUSTOMIZABLE_NAMES_.indexOf(String(name || '').trim().toLowerCase()) !== -1;
+}
 
 /** Appends rows (given in CONFIG header order) under the matching header names. */
 function writeRowsByHeader_(sheet, headers, rows) {
@@ -84,9 +91,9 @@ function setup() {
   } else if (!hadCustomizable) {
     // Upgrading an existing menu: tick Customizable for the standard hot/iced drinks.
     var mi = headerIndex_(menu);
-    var ids = menu.getRange(2, mi.ItemID + 1, menu.getLastRow() - 1, 1).getValues();
-    menu.getRange(2, mi.Customizable + 1, ids.length, 1).setValues(ids.map(function (r) {
-      return [DEFAULT_CUSTOMIZABLE_.indexOf(String(r[0]).trim()) !== -1];
+    var rows = menu.getRange(2, 1, menu.getLastRow() - 1, menu.getLastColumn()).getValues();
+    menu.getRange(2, mi.Customizable + 1, rows.length, 1).setValues(rows.map(function (r) {
+      return [isDefaultCustomizable_(r[mi.ItemID], r[mi.Name])];
     }));
   }
   var mIdx = headerIndex_(menu);
@@ -262,11 +269,11 @@ function checkSetup() {
 
   // 1. Sheets and headers
   var required = {};
-  required[CONFIG.SHEETS.MENU] = CONFIG.HEADERS.MENU;
+  // Customizable and the Options tab are optional (built-in defaults apply); they are warned about below.
+  required[CONFIG.SHEETS.MENU] = CONFIG.HEADERS.MENU.filter(function (h) { return h !== 'Customizable'; });
   required[CONFIG.SHEETS.ORDERS] = CONFIG.HEADERS.ORDERS;
   required[CONFIG.SHEETS.STAFF] = CONFIG.HEADERS.STAFF;
   required[CONFIG.SHEETS.SETTINGS] = CONFIG.HEADERS.SETTINGS;
-  required[CONFIG.SHEETS.OPTIONS] = CONFIG.HEADERS.OPTIONS;
   required[CONFIG.SHEETS.ERRORS] = CONFIG.HEADERS.ERRORS;
   var sheetsOk = true;
   Object.keys(required).forEach(function (name) {
@@ -324,6 +331,10 @@ function checkSetup() {
   info.push(menu.length + ' menu item(s), ' + available + ' available.');
   var opts = readOptions_();
   var custom = menu.filter(function (it) { return it.customizable; }).length;
+  if (!ss.getSheetByName(CONFIG.SHEETS.OPTIONS) || !headerIndex_(ss.getSheetByName(CONFIG.SHEETS.MENU)).hasOwnProperty('Customizable')) {
+    warnings.push('The Options tab or the Menu "Customizable" column is missing, so built-in drink options are being used. Run Coffee Shop > Run setup to add them so you can edit options and prices.');
+  }
+  if (!custom) warnings.push('No menu items are ticked Customizable, so the drink-options popup will never appear. Tick Customizable for Hot Coffee, Hot Tea, Iced Coffee and Hot Chocolate in the Menu tab.');
   if (custom && !opts.some(function (o) { return o.available; })) {
     warnings.push(custom + ' item(s) are Customizable but no drink options are available in the Options tab, so no options popup will appear.');
   }

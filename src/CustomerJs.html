@@ -75,6 +75,7 @@
       g.options.push(o);
     });
     document.getElementById('userEmail').textContent = data.user.email;
+    document.getElementById('appVersion').textContent = 'Version ' + data.appVersion;
     var link = document.getElementById('shopLink');
     if (data.user.isShopStaff && BOOT.baseUrl) {
       link.href = BOOT.baseUrl + '?page=shop';

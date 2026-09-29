@@ -898,6 +898,39 @@ test('security: response links do not reveal whether other orders exist', () => 
   assert.match(a, /not valid/);
 });
 
+test('upgrade: drink-options popup works on a Sheet set up before 1.3, with or without re-running setup', () => {
+  // Save current tabs, then simulate a 1.2 installation (no Customizable column, no Options tab)
+  const savedMenu = sheets.Menu.data, savedOptions = sheets.Options;
+  sheets.Menu.data = [['ItemID', 'Name', 'Price', 'Available', 'Category', 'SortOrder', 'Icon', 'Tag'],
+    ['HOT_COFFEE', 'Hot Coffee', 3, true, 'Drinks', 10, '☕', 'Hot'],      // custom ID, matched by name
+    ['ICEDCOFFEE', 'Iced Coffee', 3, true, 'Drinks', 20, '🧊', 'Iced'],
+    ['COKE', 'Coca Cola', 1, true, 'Drinks', 30, '🥤', '']];
+  delete sheets.Options;
+  cacheMap.clear();
+  try {
+    as(OTHER_TEACHER);
+    const b = ok(g.getCustomerBootstrap());
+    same(b.menu.filter(i => i.customizable).map(i => i.id), ['HOT_COFFEE', 'ICEDCOFFEE']);
+    assert.strictEqual(b.options.length, 11);
+    const r = ok(g.submitOrder(order({ name: 'Bob', delivery: false, items: [{ id: 'HOT_COFFEE', qty: 1, options: ['SUGAR', 'HALFHALF'] }] })));
+    same(r.items[0].options.map(o => o.name).sort(), ['Half and Half', 'Sugar']);
+    as(ownerEmail);
+    assert.ok(g.checkSetup().warnings.some(w => /Options tab or the Menu "Customizable" column is missing/.test(w)));
+    // Now run setup: it adds the column (ticking by ID or name) and the Options tab
+    g.setup();
+    const hdr = sheets.Menu.data[0];
+    const col = hdr.indexOf('Customizable');
+    same(sheets.Menu.data.slice(1).map(row => [row[0], row[col]]), [['HOT_COFFEE', true], ['ICEDCOFFEE', true], ['COKE', false]]);
+    assert.strictEqual(sheets.Options.data.length, 12);
+    as(OTHER_TEACHER);
+    same(ok(g.getCustomerBootstrap()).menu.filter(i => i.customizable).map(i => i.id), ['HOT_COFFEE', 'ICEDCOFFEE']);
+  } finally {
+    sheets.Menu.data = savedMenu;
+    sheets.Options = savedOptions;
+    cacheMap.clear();
+  }
+});
+
 test('Orders sheet grows past its row limit without errors', () => {
   sheets.Orders.maxRows = sheets.Orders.getLastRow();
   as(OTHER_TEACHER);

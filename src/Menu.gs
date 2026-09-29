@@ -49,7 +49,9 @@ function readMenu_() {
       sortOrder: t.idx.hasOwnProperty('SortOrder') && isFinite(Number(r[t.idx.SortOrder])) && r[t.idx.SortOrder] !== '' ? Number(r[t.idx.SortOrder]) : 9999,
       icon: t.idx.hasOwnProperty('Icon') ? cleanText_(r[t.idx.Icon], 8) : '',
       tag: t.idx.hasOwnProperty('Tag') ? cleanText_(r[t.idx.Tag], 20) : '',
-      customizable: t.idx.hasOwnProperty('Customizable') && isTrue_(r[t.idx.Customizable]),
+      // Before setup() has added the Customizable column, the standard hot/iced
+      // drinks still get the options popup.
+      customizable: t.idx.hasOwnProperty('Customizable') ? isTrue_(r[t.idx.Customizable]) : isDefaultCustomizable_(id, name),
       row: i + 2
     });
   });
@@ -79,7 +81,13 @@ function isTrue_(v) {
  * sorted by group then SortOrder. Returns [] if the sheet does not exist yet.
  */
 function readOptions_() {
-  if (!getSs_().getSheetByName(CONFIG.SHEETS.OPTIONS)) return [];
+  if (!getSs_().getSheetByName(CONFIG.SHEETS.OPTIONS)) {
+    // setup() has not created the Options tab yet: use the built-in list so
+    // the drink-options popup still works (all free, all available).
+    return SAMPLE_OPTIONS_.map(function (r) {
+      return { id: r[0], group: r[1], name: r[2], price: r[3], available: true, sortOrder: r[5] };
+    });
+  }
   var t = readTable_(CONFIG.SHEETS.OPTIONS, ['OptionID', 'Group', 'Name', 'Available']);
   var seen = dict_();
   var list = [];
@@ -166,6 +174,7 @@ function getCustomerBootstrap() {
     }
     return {
       shopName: s.SHOP_NAME,
+      appVersion: CONFIG.APP_VERSION,
       currency: s.CURRENCY_SYMBOL,
       user: { email: ctx.email, suggestedName: nameFromEmail_(ctx.email), isShopStaff: ctx.isShopStaff },
       orderingOpen: open,

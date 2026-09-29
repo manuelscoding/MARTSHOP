@@ -2,6 +2,15 @@
 
 The version number also appears at the bottom of the shop dashboard and in the health check.
 
+## 1.3.1
+
+- **Fix:** on a Sheet set up before 1.3.0, the drink-options popup never appeared (Continue went straight to Delivery) until `setup()` was run again.
+  - Missing Options tab: the built-in options are used.
+  - Missing Customizable column: Hot Coffee, Hot Tea, Iced Coffee and Hot Chocolate count as customizable, matched by ID **or** name.
+- **Setup:** when it adds the Customizable column, `setup()` now also ticks the standard drinks by name if their IDs differ.
+- **Health check:** it now warns when no item is Customizable, or when the Options tab or Customizable column is missing.
+- **Version display:** the version is shown at the bottom of the ordering page, so testers can confirm they're on the latest deployment.
+
 ## 1.3.0
 
 **Pickup limits**
