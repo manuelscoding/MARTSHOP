@@ -1,0 +1,186 @@
+<script>
+/**
+ * Scripts.html — shared browser helpers (customer page and dashboard).
+ * All user text is put on the page with textContent via App.h(), never
+ * innerHTML, so names and notes can't inject HTML or scripts.
+ * All wording comes from BOOT.strings (Strings.gs) through App.t().
+ */
+var App = (function () {
+  'use strict';
+  var STR = (window.BOOT && window.BOOT.strings) || {};
+
+  /** t('key', {name: 'x'}) -> text with {placeholders} filled. */
+  function t(key, vars) {
+    var s = STR[key];
+    if (typeof s !== 'string') return key;
+    vars = vars || {};
+    return s.replace(/\{(\w+)\}/g, function (m, k) { return Object.prototype.hasOwnProperty.call(vars, k) ? String(vars[k]) : m; });
+  }
+
+  /** Calls a server function. Resolves with data; rejects with a friendly Error. */
+  function call(fnName) {
+    var args = Array.prototype.slice.call(arguments, 1);
+    return new Promise(function (resolve, reject) {
+      google.script.run
+        .withSuccessHandler(function (res) {
+          if (!res || typeof res !== 'object') return reject(new Error(t('noResponse')));
+          if (res.ok) resolve(res.data); else reject(new Error(res.error || t('noResponse')));
+        })
+        .withFailureHandler(function (err) {
+          var msg = String((err && err.message) || err || '');
+          reject(new Error(/authoriz|permission|login|sign in|401|403/i.test(msg) ? t('sessionError') : t('netError')));
+        })[fnName].apply(null, args);
+    });
+  }
+
+  /** Creates an element. Strings become text nodes. No innerHTML, on purpose. */
+  function h(tag, attrs) {
+    var el = document.createElement(tag);
+    attrs = attrs || {};
+    Object.keys(attrs).forEach(function (k) {
+      var v = attrs[k];
+      if (v === null || v === undefined || v === false) return;
+      if (k === 'class') el.className = v;
+      else if (k === 'text') el.textContent = String(v);
+      else if (k.indexOf('on') === 0 && typeof v === 'function') el.addEventListener(k.slice(2).toLowerCase(), v);
+      else if (k === 'value' || k === 'checked' || k === 'disabled') el[k] = v;
+      else el.setAttribute(k, v === true ? '' : String(v));
+    });
+    for (var i = 2; i < arguments.length; i++) append(el, arguments[i]);
+    return el;
+  }
+  function append(el, c) {
+    if (c === null || c === undefined || c === false) return;
+    if (Array.isArray(c)) { c.forEach(function (x) { append(el, x); }); return; }
+    el.appendChild(typeof c === 'object' ? c : document.createTextNode(String(c)));
+  }
+  function clear(el) { while (el.firstChild) el.removeChild(el.firstChild); return el; }
+
+  var currency = '$';
+  function setCurrency(c) { currency = c || '$'; }
+  function cents(n) { return Math.round(Number(n || 0) * 100); }
+  function money(n) { return currency + (cents(n) / 100).toFixed(2); }
+
+  function timeAgo(ms, now) {
+    var sec = Math.max(0, Math.floor(((now || Date.now()) - ms) / 1000));
+    if (sec < 45) return t('justNow');
+    var min = Math.floor(sec / 60);
+    if (min < 60) return t('ago', { t: t('minutes', { n: min }) });
+    var hr = Math.floor(min / 60);
+    return t('ago', { t: t('hours', { n: hr }) + (min % 60 ? ' ' + t('minutes', { n: min % 60 }) : '') });
+  }
+  function dateTime(ms) {
+    return ms ? new Date(ms).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+  }
+  function time(ms) { return ms ? new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : ''; }
+
+  /** Status shown with an icon AND text (never colour alone). */
+  var STATUS_INFO = {
+    'Received': { icon: '📥', key: 'statusReceived', cls: 'received' },
+    'Preparing': { icon: '🥣', key: 'statusPreparing', cls: 'preparing' },
+    'Out for Delivery': { icon: '🚚', key: 'statusOut', cls: 'out' },
+    'Delivered': { icon: '✅', key: 'statusDelivered', cls: 'delivered' },
+    'Cancelled': { icon: '✖', key: 'statusCancelled', cls: 'cancelled' }
+  };
+  function statusBadge(status) {
+    var s = STATUS_INFO[status] || { icon: '•', key: status, cls: 'received' };
+    return h('span', { class: 'status status-' + s.cls }, h('span', { 'aria-hidden': 'true' }, s.icon + ' '), t(s.key));
+  }
+
+  var toastTimer = null;
+  function toast(msg, type, action) {
+    var el = document.getElementById('toast');
+    if (!el) return;
+    clear(el).appendChild(document.createTextNode(msg));
+    if (action) el.appendChild(h('button', { type: 'button', class: 'toast-action', onclick: function () { el.hidden = true; action.onClick(); } }, action.label));
+    el.className = type || '';
+    el.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.hidden = true; }, action ? 8000 : (type === 'error' ? 7000 : 3500));
+  }
+
+  /** Screen-reader announcement (polite live region). */
+  function announce(msg) {
+    var el = document.getElementById('announcer');
+    if (!el) return;
+    el.textContent = '';
+    setTimeout(function () { el.textContent = msg; }, 50);
+  }
+
+  function uuid() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    var a = new Uint8Array(16);
+    crypto.getRandomValues(a);
+    return Array.prototype.map.call(a, function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+  }
+
+  /** Accessible modal dialog. Resolves with the clicked button's value, or null. */
+  function modal(opts) {
+    return new Promise(function (resolve) {
+      var previous = document.activeElement;
+      var titleId = 'm' + Math.random().toString(36).slice(2);
+      var backdrop, box;
+      function close(v) {
+        document.removeEventListener('keydown', onKey, true);
+        if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
+        if (previous && previous.focus) try { previous.focus(); } catch (e) { /* gone */ }
+        resolve(v);
+      }
+      function onKey(e) {
+        if (e.key === 'Escape') { e.preventDefault(); close(null); }
+        if (e.key === 'Tab') {
+          var f = box.querySelectorAll('button, input, textarea, select, a[href]');
+          if (!f.length) return;
+          if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f[f.length - 1].focus(); }
+          else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
+        }
+      }
+      var buttons = (opts.buttons || [{ label: t('ok'), class: 'btn primary', value: true }]).map(function (b) {
+        return h('button', { type: 'button', class: b.class || 'btn', onclick: function () { if (b.validate && !b.validate()) return; close(b.value); } }, b.label);
+      });
+      box = h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': titleId },
+        h('h2', { id: titleId, text: opts.title }),
+        typeof opts.body === 'string' ? h('p', { text: opts.body }) : opts.body,
+        h('div', { class: 'actions' }, buttons));
+      backdrop = h('div', { class: 'modal-backdrop', onclick: function (e) { if (e.target === backdrop) close(null); } }, box);
+      document.body.appendChild(backdrop);
+      document.addEventListener('keydown', onKey, true);
+      var focusTarget = box.querySelector('input, textarea') || buttons[buttons.length - 1];
+      if (focusTarget) focusTarget.focus();
+    });
+  }
+  function confirm(title, body, okLabel, danger) {
+    return modal({ title: title, body: body, buttons: [
+      { label: t('goBack'), class: 'btn', value: false },
+      { label: okLabel, class: danger ? 'btn danger solid' : 'btn primary', value: true }
+    ] }).then(function (v) { return v === true; });
+  }
+
+  function loading(text) {
+    return h('div', { class: 'loading', role: 'status' }, h('div', { class: 'spinner', 'aria-hidden': 'true' }), h('span', null, text || t('loading')));
+  }
+  function errorPanel(message, onRetry) {
+    return h('div', { class: 'panel', role: 'alert' }, h('div', { class: 'alert error', text: message }),
+      onRetry ? h('button', { type: 'button', class: 'btn primary', onclick: onRetry }, t('retry')) : null);
+  }
+
+  var store = {
+    get: function (k) { try { return window.localStorage.getItem(k); } catch (e) { return null; } },
+    set: function (k, v) { try { window.localStorage.setItem(k, v); } catch (e) { /* blocked */ } }
+  };
+
+  /** Prints the given element only (print CSS hides everything else). */
+  function printNode(node) {
+    var area = document.getElementById('printArea');
+    clear(area).appendChild(node);
+    document.body.classList.add('printing');
+    var done = function () { document.body.classList.remove('printing'); window.removeEventListener('afterprint', done); };
+    window.addEventListener('afterprint', done);
+    try { window.print(); } catch (e) { toast(t('printFallback'), 'error'); }
+  }
+
+  return { t: t, call: call, h: h, clear: clear, money: money, cents: cents, setCurrency: setCurrency,
+    timeAgo: timeAgo, dateTime: dateTime, time: time, statusBadge: statusBadge, toast: toast, announce: announce,
+    uuid: uuid, modal: modal, confirm: confirm, loading: loading, errorPanel: errorPanel, store: store, printNode: printNode };
+})();
+</script>

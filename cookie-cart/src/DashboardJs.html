@@ -1,0 +1,429 @@
+<script>
+/**
+ * DashboardJs.html — Cookie Cart staff dashboard.
+ * Polls getDashboard() every POLL_SECONDS; the server answers "unchanged"
+ * cheaply when nothing happened. Every button calls a server function that
+ * re-checks staff access.
+ */
+(function () {
+  'use strict';
+  var h = App.h, t = App.t;
+  var BOOT = window.BOOT || {};
+  var ST = { R: 'Received', P: 'Preparing', O: 'Out for Delivery', D: 'Delivered', C: 'Cancelled' };
+  var ACTIVE = [ST.R, ST.P, ST.O];
+
+  var S = { boot: null, data: null, version: '', known: null, newUntil: {}, polling: false, pendingForce: false,
+    failures: 0, lastOk: 0, offset: 0, tab: 'orders', busy: {} };
+
+  /* ---------------- tabs ---------------- */
+  var TABS = [['orders', 'tabOrders'], ['route', 'tabRoute'], ['history', 'tabHistory'], ['reports', 'tabReports'], ['controls', 'tabControls']];
+  var tabsEl = document.getElementById('tabs');
+  TABS.forEach(function (tb, i) {
+    var b = h('button', { type: 'button', role: 'tab', id: 'tab-' + tb[0], 'aria-controls': 'panel-' + tb[0],
+      'aria-selected': String(i === 0), tabindex: i === 0 ? '0' : '-1', onclick: function () { showTab(tb[0]); } }, t(tb[1]));
+    if (tb[0] === 'orders') b.appendChild(h('span', { class: 'count', id: 'activeCount' }, '0'));
+    b.addEventListener('keydown', function (e) {
+      if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+      var next = TABS[(i + (e.key === 'ArrowRight' ? 1 : TABS.length - 1)) % TABS.length][0];
+      showTab(next);
+      document.getElementById('tab-' + next).focus();
+    });
+    tabsEl.appendChild(b);
+  });
+  function showTab(name) {
+    S.tab = name;
+    TABS.forEach(function (tb) {
+      var on = tb[0] === name;
+      var b = document.getElementById('tab-' + tb[0]);
+      b.setAttribute('aria-selected', String(on));
+      b.tabIndex = on ? 0 : -1;
+      document.getElementById('panel-' + tb[0]).hidden = !on;
+    });
+    if (name === 'route') renderRoute();
+    if (name === 'history' && !S.historyInit) renderHistoryForm();
+    if (name === 'reports' && !S.reportsInit) renderReportsForm();
+    if (name === 'controls') renderControls();
+  }
+
+  /* ---------------- filters ---------------- */
+  var fStatus = document.getElementById('fStatus');
+  document.getElementById('fStatusLabel').textContent = t('filterStatus');
+  document.getElementById('fTextLabel').textContent = t('filterSearch');
+  document.getElementById('fDateLabel').textContent = t('filterDate');
+  [['active', t('filterAllActive')], ['all', t('filterAll')], [ST.R, t('statusReceived')], [ST.P, t('statusPreparing')], [ST.O, t('statusOut')], [ST.D, t('statusDelivered')], [ST.C, t('statusCancelled')]]
+    .forEach(function (o) { fStatus.appendChild(h('option', { value: o[0] }, o[1])); });
+  ['fStatus', 'fText', 'fDate'].forEach(function (id) { document.getElementById(id).addEventListener('input', renderOrders); });
+
+  function filtered() {
+    var st = fStatus.value;
+    var q = document.getElementById('fText').value.trim().toLowerCase().replace(/^#/, '');
+    var date = document.getElementById('fDate').value;
+    return (S.data ? S.data.orders : []).filter(function (o) {
+      if (st === 'active' && ACTIVE.indexOf(o.status) === -1) return false;
+      if (st !== 'active' && st !== 'all' && o.status !== st) return false;
+      if (date && dayKey(o.createdAt) !== date) return false;
+      if (q) {
+        var hay = [String(o.orderNumber), o.room.toLowerCase(), o.customerName.toLowerCase(), o.customerEmail];
+        if (!hay.some(function (x) { return x.indexOf(q) !== -1; })) return false;
+      }
+      return true;
+    });
+  }
+  function dayKey(ms) {
+    var d = new Date(ms);
+    return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+  }
+
+  /* ---------------- startup & polling ---------------- */
+  function init() {
+    App.call('getDashboardBootstrap').then(function (b) {
+      S.boot = b;
+      App.setCurrency(b.currency);
+      document.getElementById('userEmail').textContent = b.user.email;
+      document.getElementById('appVersion').textContent = t('version', { v: b.appVersion });
+      poll(true);
+      setInterval(tick, 5000);
+    }).catch(function (err) { App.clear(document.getElementById('orders')).appendChild(App.errorPanel(err.message, init)); });
+  }
+
+  function poll(force) {
+    if (S.polling) { if (force) S.pendingForce = true; return; }
+    S.polling = true;
+    App.call('getDashboard', force ? '' : S.version).then(function (res) {
+      S.failures = 0;
+      S.lastOk = Date.now();
+      S.offset = res.serverNow - Date.now();
+      if (!res.unchanged) { S.version = res.version; receive(res); }
+      else if (S.data) S.data.ordering = res.ordering;
+      setConn(true);
+    }).catch(function (err) {
+      S.failures++;
+      setConn(false);
+      if (S.failures >= 4) staleBanner(true);
+      if (!S.data) App.clear(document.getElementById('orders')).appendChild(App.errorPanel(err.message, function () { poll(true); }));
+    }).then(function () {
+      S.polling = false;
+      if (S.pendingForce) { S.pendingForce = false; poll(true); return; }
+      var base = (S.boot ? S.boot.pollSeconds : 12) * 1000;
+      if (document.hidden) base = Math.max(base, 30000);
+      setTimeout(function () { poll(false); }, S.failures ? Math.min(60000, base * Math.pow(2, Math.min(S.failures, 3))) : base);
+    });
+  }
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) poll(false); });
+
+  function setConn(ok) {
+    var c = document.getElementById('conn');
+    c.classList.toggle('bad', !ok);
+    c.textContent = ok ? t('live', { ago: t('justNow') }) : t('offline');
+    if (ok) staleBanner(false);
+  }
+  function staleBanner(show) {
+    var el = document.getElementById('staleBanner');
+    App.clear(el);
+    if (show) el.appendChild(h('div', { class: 'alert error', role: 'alert' }, h('strong', null, t('staleBanner') + ' '),
+      h('a', { class: 'btn small', href: (BOOT.baseUrl || '') + '?page=dashboard', target: '_top' }, t('reload'))));
+  }
+
+  function receive(res) {
+    var first = S.known === null;
+    var known = {};
+    res.orders.forEach(function (o) {
+      var prev = first ? null : S.known[o.orderNumber];
+      if (!first && !prev && ACTIVE.indexOf(o.status) !== -1) {
+        S.newUntil[o.orderNumber] = Date.now() + 3 * 60000;
+        App.announce(t('announceNew', { n: o.orderNumber, room: o.room }));
+      }
+      if (!first && prev && o.afterDispatch && prev.v !== o.version) App.announce(t('announceChanged', { n: o.orderNumber }));
+      known[o.orderNumber] = { v: o.version };
+    });
+    S.known = known;
+    S.data = res;
+    renderPrep();
+    renderOrders();
+    if (S.tab === 'route') renderRoute();
+    if (S.tab === 'controls') renderControls();
+  }
+
+  /** Updates timers without re-rendering. */
+  function tick() {
+    var now = Date.now() + S.offset;
+    Array.prototype.forEach.call(document.querySelectorAll('[data-since]'), function (el) {
+      var since = Number(el.getAttribute('data-since'));
+      el.textContent = t('submitted', { ago: App.timeAgo(since, now) });
+      el.classList.toggle('old', now - since > 20 * 60000);
+    });
+    if (S.lastOk && !document.getElementById('conn').classList.contains('bad')) {
+      var secs = Math.round((Date.now() - S.lastOk) / 1000);
+      document.getElementById('conn').textContent = t('live', { ago: secs < 5 ? t('justNow') : t('ago', { t: t('seconds', { n: secs }) }) });
+    }
+  }
+
+  /* ---------------- prep summary ---------------- */
+  function renderPrep() {
+    var el = App.clear(document.getElementById('prep'));
+    var rows = S.data.prep || [];
+    if (!rows.length) return;
+    rows.forEach(function (r) {
+      el.appendChild(h('div', { class: 'prep-title' }, r.name));
+      el.appendChild(h('div', { class: 'prep' },
+        tile(t('prepNeeded'), r.needed), tile(t('prepRemaining'), r.remaining, 'remaining'),
+        tile(t('prepOut'), r.out), tile(t('prepDelivered'), r.delivered)));
+    });
+    (S.data.products || []).forEach(function (p) {
+      if (p.lowStock || (p.left === 0 && p.dailyLimit)) {
+        el.appendChild(h('div', { class: 'alert warn' }, '⚠ ' + p.name + ': ' + (p.left === 0 ? t('soldOutToday') : t('leftToday', { n: p.left }))));
+      }
+    });
+  }
+  function tile(label, n, cls) {
+    return h('div', { class: 'tile' + (cls ? ' ' + cls : '') }, h('div', { class: 'small muted' }, label), h('div', { class: 'n' }, String(n)));
+  }
+
+  /* ---------------- order cards ---------------- */
+  function renderOrders() {
+    var el = App.clear(document.getElementById('orders'));
+    var list = filtered();
+    document.getElementById('activeCount').textContent = String((S.data.orders || []).filter(function (o) { return ACTIVE.indexOf(o.status) !== -1; }).length);
+    if (!list.length) { el.appendChild(h('div', { class: 'empty', style: 'grid-column:1/-1' }, t('noActive'))); return; }
+    list.forEach(function (o) { el.appendChild(card(o)); });
+    tick();
+  }
+
+  function card(o) {
+    var isNew = S.newUntil[o.orderNumber] && S.newUntil[o.orderNumber] > Date.now();
+    var busy = !!S.busy[o.orderNumber];
+    var cls = 'card' + (isNew ? ' is-new' : '') + (o.afterDispatch ? ' dispatch-alert' : '');
+    return h('article', { class: cls, 'aria-label': '#' + o.orderNumber + ', ' + t('room') + ' ' + o.room },
+      h('div', { class: 'top' },
+        h('span', { class: 'num' }, '#' + o.orderNumber),
+        App.statusBadge(o.status),
+        isNew ? h('span', { class: 'badge new' }, '🆕 ' + t('newBadge')) : null,
+        o.edited ? h('span', { class: 'badge edited' }, '✏️ ' + t('editedBadge')) : null,
+        o.allergy ? h('span', { class: 'badge allergy' }, '⚠ ' + t('allergyBadge')) : null,
+        o.customerType === 'Student' ? h('span', { class: 'badge student' }, t('studentBadge')) : null,
+        h('span', { class: 'spacer' }),
+        ACTIVE.indexOf(o.status) !== -1 ? h('span', { class: 'elapsed', 'data-since': String(o.createdAt), title: App.dateTime(o.createdAt) }) : null),
+      o.afterDispatch ? dispatchBox(o, busy) : null,
+      h('div', { class: 'roomline' }, t('room').toUpperCase(), h('span', { class: 'room' }, o.room)),
+      h('div', null, h('strong', null, o.customerName), h('div', { class: 'small muted' }, o.customerEmail)),
+      o.classOrNote ? h('div', { class: 'small' }, t('classLabel') + ': ' + o.classOrNote) : null,
+      h('ul', { class: 'items' }, o.items.map(function (l) {
+        return h('li', null, h('span', { class: 'q' }, l.quantity + '×'), h('span', null, l.name), h('span', { class: 'p' }, App.money(App.cents(l.unitPrice) * l.quantity / 100)));
+      })),
+      h('div', { class: 'meta' }, h('span', { class: 'total' }, App.money(o.total)), h('span', { class: 'badge edited' }, o.payment),
+        o.deliveryWindow ? h('span', { class: 'small' }, '🕒 ' + o.deliveryWindow) : null),
+      o.instructions ? h('div', { class: 'notes' }, '📝 ' + o.instructions) : null,
+      actions(o, busy));
+  }
+
+  /** High-visibility box: icon + text + colour, plus exactly what changed. */
+  function dispatchBox(o, busy) {
+    var lines = (o.changes || []).map(function (c) {
+      return c.name + ': ' + t('changeWas', { old: c.old, now: c.now, diff: (c.diff > 0 ? '+' : '') + c.diff });
+    });
+    if (o.roomChange) lines.push(t('roomChanged', { old: o.roomChange.old, now: o.roomChange.now }));
+    return h('div', { class: 'dispatch-box', role: 'alert' },
+      h('strong', { class: 'title' }, '⚠ ' + t('dispatchedBadge')),
+      h('ul', { style: 'margin:6px 0 8px;padding-left:20px' }, lines.map(function (l) { return h('li', { style: 'font-weight:800;font-size:1.05rem' }, l); })),
+      h('button', { type: 'button', class: 'btn small alert', disabled: busy, onclick: function () { run(o.orderNumber, 'acknowledgeChange', [o.orderNumber], t('acknowledged', { n: o.orderNumber })); } }, '✔ ' + t('acknowledge')));
+  }
+
+  function actions(o, busy) {
+    var n = o.orderNumber;
+    var b = function (label, cls, fn) { return h('button', { type: 'button', class: 'btn small ' + cls, disabled: busy, onclick: fn }, label); };
+    var list = [];
+    if (o.status === ST.R) list.push(b(t('startPreparing'), '', function () { run(n, 'staffUpdateStatus', [n, 'prepare'], t('startPreparing') + ' #' + n); }));
+    if (o.status === ST.R || o.status === ST.P) list.push(b('🚚 ' + t('markOut'), 'primary', function () { run(n, 'staffUpdateStatus', [n, 'dispatch'], t('markOut') + ' #' + n); }));
+    if (o.status === ST.O) list.push(b('✅ ' + t('markDelivered'), 'ok', function () { run(n, 'staffUpdateStatus', [n, 'deliver'], t('markDelivered') + ' #' + n); }));
+    if (ACTIVE.indexOf(o.status) !== -1) list.push(b(t('cancelOrderStaff'), 'danger', function () { cancelDialog(o); }));
+    list.push(b(t('printOne'), '', function () { App.printNode(labelsNode([o])); }));
+    return h('div', { class: 'actions' }, list);
+  }
+
+  function run(n, fn, args, okMsg) {
+    S.busy[n] = true;
+    renderOrders();
+    return App.call.apply(null, [fn].concat(args)).then(function (res) {
+      App.toast(okMsg, 'ok');
+      if (res && res.warning === 'email') App.toast(t('emailNotSentStaff', { msg: okMsg }), 'error');
+    }).catch(function (err) { App.toast(err.message, 'error'); })
+      .then(function () { delete S.busy[n]; poll(true); });
+  }
+
+  function cancelDialog(o) {
+    var reason = h('input', { type: 'text', id: 'cancelReason', maxlength: '200' });
+    App.modal({ title: t('cancelStaffTitle', { n: o.orderNumber }), body: h('div', null, h('p', null, t('cancelStaffBody')),
+      h('label', { for: 'cancelReason' }, t('cancelReason')), reason),
+      buttons: [{ label: t('goBack'), class: 'btn', value: null }, { label: t('cancelOrderStaff'), class: 'btn danger solid', value: 'go' }] })
+      .then(function (v) { if (v === 'go') run(o.orderNumber, 'staffUpdateStatus', [o.orderNumber, 'cancel', reason.value], t('cancelled', { n: o.orderNumber })); });
+  }
+
+  /* ---------------- delivery route & printing ---------------- */
+  function routeGroups() {
+    var out = (S.data ? S.data.orders : []).filter(function (o) { return o.status === ST.O; });
+    var groups = {};
+    out.forEach(function (o) { (groups[o.room] = groups[o.room] || []).push(o); });
+    return Object.keys(groups).sort(function (a, b) { return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }); })
+      .map(function (room) { return { room: room, orders: groups[room] }; });
+  }
+
+  function renderRoute() {
+    var el = App.clear(document.getElementById('panel-route'));
+    var groups = routeGroups();
+    el.appendChild(h('div', { class: 'row', style: 'margin-bottom:12px' }, h('h2', { style: 'margin:0' }, t('routeHeading')), h('span', { class: 'spacer' }),
+      h('button', { type: 'button', class: 'btn', disabled: !groups.length, onclick: function () { App.printNode(sheetNode(groups)); } }, t('printSheet')),
+      h('button', { type: 'button', class: 'btn', disabled: !groups.length, onclick: function () { App.printNode(labelsNode(groups.reduce(function (a, g) { return a.concat(g.orders); }, []))); } }, t('printLabels'))));
+    if (!groups.length) { el.appendChild(h('div', { class: 'empty' }, t('routeEmpty'))); return; }
+    groups.forEach(function (g) {
+      el.appendChild(h('section', { class: 'route-room', 'aria-label': t('room') + ' ' + g.room },
+        h('h3', null, t('room') + ' ' + g.room),
+        g.orders.map(function (o) {
+          return h('div', { class: 'row', style: 'border-top:1px dashed var(--border);padding:8px 0' },
+            h('strong', null, '#' + o.orderNumber), h('span', null, o.customerName),
+            h('span', null, o.items.map(function (l) { return l.quantity + '× ' + l.name; }).join(', ')),
+            o.allergy ? h('span', { class: 'badge allergy' }, '⚠ ' + t('allergyBadge')) : null,
+            o.afterDispatch ? h('span', { class: 'badge allergy' }, '⚠ ' + t('dispatchedBadge')) : null,
+            h('span', { class: 'spacer' }),
+            h('button', { type: 'button', class: 'btn small ok', onclick: function () { run(o.orderNumber, 'staffUpdateStatus', [o.orderNumber, 'deliver'], t('markDelivered') + ' #' + o.orderNumber); } }, '✅ ' + t('markDelivered')));
+        })));
+    });
+  }
+
+  function sheetNode(groups) {
+    var app = S.boot ? S.boot.appName : '';
+    return h('div', null,
+      h('h1', { style: 'font-size:18pt;margin:0 0 4px' }, app + ' — ' + t('sheetTitle')),
+      h('p', null, App.dateTime(Date.now())),
+      h('table', { class: 'sheet-table' },
+        h('thead', null, h('tr', null, [t('colRoom'), t('colOrder'), t('colTeacher'), t('colCookies'), t('colNotes'), t('delivered')].map(function (c) { return h('th', null, c); }))),
+        h('tbody', null, groups.reduce(function (rows, g) {
+          return rows.concat(g.orders.map(function (o) {
+            return h('tr', null, h('td', { style: 'font-size:14pt;font-weight:800' }, o.room), h('td', null, '#' + o.orderNumber),
+              h('td', null, o.customerName), h('td', null, o.items.map(function (l) { return l.quantity + ' × ' + l.name; }).join(', ')),
+              h('td', null, (o.allergy ? '⚠ ' + t('allergyBadge') + '. ' : '') + (o.instructions || '') + (o.deliveryWindow ? ' [' + o.deliveryWindow + ']' : '')),
+              h('td', null, h('span', { class: 'box' })));
+          }));
+        }, []))));
+  }
+
+  /** Bag labels: order number, teacher, room, quantity, allergy notes. */
+  function labelsNode(orders) {
+    return h('div', { class: 'labels' }, orders.map(function (o) {
+      return h('div', { class: 'label' },
+        h('div', { class: 'lroom' }, t('room') + ' ' + o.room),
+        h('div', { class: 'lnum' }, '#' + o.orderNumber + ' · ' + o.customerName),
+        h('div', null, o.items.map(function (l) { return l.quantity + ' × ' + l.name; }).join(', ')),
+        o.classOrNote ? h('div', null, o.classOrNote) : null,
+        o.allergy ? h('div', { class: 'lallergy' }, '⚠ ' + t('labelAllergy', { note: o.instructions || t('allergyKeepSeparate') })) : (o.instructions ? h('div', null, o.instructions) : null));
+    }));
+  }
+
+  /* ---------------- history ---------------- */
+  function renderHistoryForm() {
+    S.historyInit = true;
+    var el = App.clear(document.getElementById('panel-history'));
+    var text = h('input', { type: 'search', id: 'hText', maxlength: '100' });
+    var date = h('input', { type: 'date', id: 'hDate' });
+    var results = h('div', { 'aria-live': 'polite' });
+    var form = h('form', { class: 'panel filters', role: 'search', onsubmit: function (e) { e.preventDefault(); load(); } },
+      h('div', null, h('label', { for: 'hText' }, t('historySearch')), text),
+      h('div', null, h('label', { for: 'hDate' }, t('filterDate')), date),
+      h('div', { class: 'row' }, h('button', { type: 'submit', class: 'btn primary' }, t('search')),
+        h('button', { type: 'button', class: 'btn', onclick: function () { text.value = ''; date.value = ''; load(); } }, t('clear'))));
+    el.appendChild(form);
+    el.appendChild(results);
+    function load() {
+      App.clear(results).appendChild(App.loading());
+      App.call('getHistory', { text: text.value, date: date.value }).then(function (res) {
+        App.clear(results).appendChild(h('p', { class: 'muted' }, t('found', { n: res.total })));
+        res.orders.forEach(function (o) {
+          var log = h('ol', { class: 'log' });
+          var det = h('details', { class: 'hist' },
+            h('summary', null, h('strong', null, '#' + o.orderNumber), App.statusBadge(o.status), h('span', null, o.customerName),
+              h('span', null, t('room') + ' ' + o.room), h('span', { class: 'small muted' }, App.dateTime(o.createdAt)), h('span', { class: 'spacer' }), h('strong', null, App.money(o.total))),
+            h('div', { class: 'body' },
+              h('p', null, o.items.map(function (l) { return l.quantity + ' × ' + l.name; }).join(', ') + ' · ' + o.payment),
+              o.instructions ? h('div', { class: 'notes' }, o.instructions) : null,
+              h('h3', { class: 'small' }, t('changeLog')), log,
+              h('button', { type: 'button', class: 'btn small', onclick: function () { App.printNode(labelsNode([o])); } }, t('printOne'))));
+          det.addEventListener('toggle', function () {
+            if (!det.open || det.getAttribute('data-loaded')) return;
+            det.setAttribute('data-loaded', '1');
+            log.appendChild(h('li', null, t('loadingLog')));
+            App.call('getOrderLog', o.orderNumber).then(function (rows) {
+              App.clear(log);
+              rows.forEach(function (r) {
+                var qty = function (items) { return items.map(function (l) { return l.quantity + '× ' + l.name; }).join(', '); };
+                log.appendChild(h('li', null, h('strong', null, r.action), ' — ' + App.dateTime(r.at) + (r.by ? ' · ' + r.by : ''),
+                  r.oldItems.length || r.newItems.length ? h('div', { class: 'small muted' }, (r.oldItems.length ? qty(r.oldItems) + ' ' : '') + (r.newItems.length ? '→ ' + qty(r.newItems) : '') +
+                    (r.newTotal !== null ? ' (' + (r.oldTotal !== null ? App.money(r.oldTotal) + ' → ' : '') + App.money(r.newTotal) + ')' : '')) : null));
+              });
+            }).catch(function (e) { App.clear(log).appendChild(h('li', null, e.message)); });
+          });
+          results.appendChild(det);
+        });
+      }).catch(function (e) { App.clear(results).appendChild(App.errorPanel(e.message, load)); });
+    }
+    load();
+  }
+
+  /* ---------------- day summary ---------------- */
+  function renderReportsForm() {
+    S.reportsInit = true;
+    var el = App.clear(document.getElementById('panel-reports'));
+    var date = h('input', { type: 'date', id: 'rDate', value: dayKey(Date.now()) });
+    var out = h('div', { 'aria-live': 'polite' });
+    el.appendChild(h('form', { class: 'panel row', onsubmit: function (e) { e.preventDefault(); load(); } },
+      h('div', null, h('label', { for: 'rDate' }, t('reportDate')), date), h('button', { type: 'submit', class: 'btn primary', style: 'align-self:end' }, t('runReport'))));
+    el.appendChild(out);
+    function load() {
+      App.clear(out).appendChild(App.loading());
+      App.call('getDaySummary', date.value).then(function (s) {
+        App.clear(out).appendChild(h('div', null,
+          h('div', { class: 'prep' }, tile(t('ordersCount'), s.orders), tile(t('revenue'), App.money(s.revenue)), tile(t('cancellations'), s.cancellations), tile(t('postDispatchEdits'), s.postDispatchEdits)),
+          h('div', { class: 'panel' }, h('h3', null, t('cookiesSold')),
+            h('table', { class: 'summary' }, h('tbody', null, s.cookies.map(function (c) { return h('tr', null, h('td', null, c.name), h('td', { class: 'num' }, String(c.quantity)), h('td', { class: 'num' }, App.money(c.revenue))); })))),
+          h('div', { class: 'panel' }, h('h3', null, t('byPayment')),
+            h('table', { class: 'summary' }, h('tbody', null, s.byPayment.map(function (p) { return h('tr', null, h('td', null, p.method), h('td', { class: 'num' }, App.money(p.amount))); }))))));
+      }).catch(function (e) { App.clear(out).appendChild(App.errorPanel(e.message, load)); });
+    }
+    load();
+  }
+
+  /* ---------------- controls ---------------- */
+  function renderControls() {
+    var el = App.clear(document.getElementById('panel-controls'));
+    if (!S.data) { el.appendChild(App.loading()); return; }
+    var o = S.data.ordering;
+    el.appendChild(h('section', { class: 'panel' }, h('h2', null, t('controlsHeading')),
+      h('p', { class: 'row' }, h('strong', { style: 'font-size:1.2rem' }, (o.enabled ? '🟢 ' + t('orderingOpen') : '🔴 ' + t('orderingClosed'))),
+        o.enabled && !o.open ? h('span', { class: 'muted' }, '(' + o.message + ')') : null),
+      h('button', { type: 'button', class: o.enabled ? 'btn danger' : 'btn ok', onclick: function (e) {
+        e.currentTarget.disabled = true;
+        App.call('setOrderingEnabled', !o.enabled).then(function () { App.toast(t('saved'), 'ok'); poll(true); })
+          .catch(function (err) { App.toast(err.message, 'error'); renderControls(); });
+      } }, o.enabled ? t('closeOrdering') : t('openOrdering'))));
+    var sec = h('section', { class: 'panel' }, h('h2', null, t('productsHeading')));
+    (S.data.products || []).forEach(function (p) {
+      var avail = h('input', { type: 'checkbox', id: 'av-' + p.id, checked: p.available });
+      var limit = h('input', { type: 'number', id: 'lim-' + p.id, min: '0', step: '1', value: String(p.dailyLimit || 0) });
+      avail.addEventListener('change', function () {
+        avail.disabled = true;
+        App.call('setProductAvailable', p.id, avail.checked).then(function () { App.toast(p.name + ': ' + (avail.checked ? t('available') : t('soldOut')), 'ok'); poll(true); })
+          .catch(function (err) { avail.checked = !avail.checked; App.toast(err.message, 'error'); }).then(function () { avail.disabled = false; });
+      });
+      sec.appendChild(h('div', { class: 'ctl-row' },
+        h('div', { class: 'name' }, p.name, h('div', { class: 'small muted' }, t('soldToday', { n: p.soldToday }) + (p.left !== null ? ' · ' + t('leftToday', { n: p.left }) : ''))),
+        h('label', { class: 'check', for: 'av-' + p.id }, avail, t('available')),
+        h('div', null, h('label', { for: 'lim-' + p.id, class: 'small' }, t('dailyLimit')), h('div', { class: 'row' }, limit,
+          h('button', { type: 'button', class: 'btn small', onclick: function () {
+            App.call('setProductDailyLimit', p.id, Number(limit.value)).then(function () { App.toast(t('saved'), 'ok'); poll(true); })
+              .catch(function (err) { App.toast(err.message, 'error'); });
+          } }, t('save'))))));
+    });
+    el.appendChild(sec);
+  }
+
+  init();
+})();
+</script>

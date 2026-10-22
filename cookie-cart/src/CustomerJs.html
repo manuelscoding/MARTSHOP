@@ -1,0 +1,547 @@
+<script>
+/**
+ * CustomerJs.html — the teacher ordering page.
+ *
+ * Steps: pick (cookies) -> details -> review -> done
+ * Modes: 'order' (new), 'edit' (from My orders or the email button),
+ *        'cancel' (from the email link), and the My orders tab.
+ * Totals shown here are for display; the server recalculates everything.
+ */
+(function () {
+  'use strict';
+  var h = App.h, t = App.t;
+  var BOOT = window.BOOT || {};
+  var app = document.getElementById('app');
+
+  var S = {
+    data: null,             // getCustomerBootstrap()
+    step: 'pick',
+    mode: 'order',          // 'order' | 'edit'
+    editing: null,          // order being edited (with .rules)
+    token: '',              // edit link token (email links only)
+    qty: {},                // productId -> quantity
+    details: { name: '', room: '', classOrNote: '', instructions: '', deliveryWindow: '', allergy: false, payment: '', accountName: '' },
+    requestId: App.uuid(),
+    busy: false,
+    note: ''
+  };
+
+  /* ---------------- startup ---------------- */
+
+  document.getElementById('tab-order').textContent = t('tabOrder');
+  document.getElementById('tab-mine').textContent = t('tabMyOrders');
+  document.getElementById('tab-order').addEventListener('click', function () { showTab('order'); });
+  document.getElementById('tab-mine').addEventListener('click', function () { showTab('mine'); });
+  ['tab-order', 'tab-mine'].forEach(function (id, i, all) {
+    document.getElementById(id).addEventListener('keydown', function (e) {
+      if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+      var next = all[(i + 1) % all.length];
+      document.getElementById(next).click();
+      document.getElementById(next).focus();
+    });
+  });
+
+  function showTab(name) {
+    ['order', 'mine'].forEach(function (n) {
+      var tab = document.getElementById('tab-' + n);
+      tab.setAttribute('aria-selected', String(n === name));
+      tab.tabIndex = n === name ? 0 : -1;
+    });
+    if (name === 'mine') renderMyOrders();
+    else if (S.mode === 'edit') go(S.step);
+    else startNew();
+  }
+
+  function init() {
+    App.clear(app).appendChild(App.loading());
+    App.call('getCustomerBootstrap').then(function (data) {
+      S.data = data;
+      App.setCurrency(data.currency);
+      document.getElementById('userEmail').textContent = data.user.email;
+      document.getElementById('appVersion').textContent = t('version', { v: data.appVersion });
+      if (data.user.isStaff && BOOT.baseUrl) {
+        var link = document.getElementById('dashLink');
+        link.href = BOOT.baseUrl + '?page=dashboard';
+        link.textContent = t('dashboardLink');
+        link.hidden = false;
+      }
+      resetDetails();
+      if (BOOT.mode === 'edit') return openEdit(BOOT.order, BOOT.token);
+      if (BOOT.mode === 'cancel') return openCancelLink(BOOT.order, BOOT.token);
+      if (BOOT.mode === 'myorders') return showTab('mine');
+      startNew();
+    }).catch(function (err) { App.clear(app).appendChild(App.errorPanel(err.message, init)); });
+  }
+
+  function resetDetails() {
+    var d = S.data;
+    S.details = {
+      name: d.user.suggestedName || '',
+      room: d.lastRoom || App.store.get('cookie_room') || '',
+      classOrNote: d.lastClass || '', instructions: '', deliveryWindow: '', allergy: false, payment: '', accountName: ''
+    };
+  }
+
+  function startNew() {
+    S.mode = 'order';
+    S.editing = null;
+    S.token = '';
+    S.qty = {};
+    S.note = '';
+    S.requestId = App.uuid();
+    if (!S.data.ordering.open) return renderClosed();
+    go('pick');
+  }
+
+  function go(step) {
+    S.step = step;
+    if (step === 'pick') renderPick();
+    else if (step === 'details') renderDetails();
+    else if (step === 'review') renderReview();
+    window.scrollTo(0, 0);
+    var hd = app.querySelector('h2');
+    if (hd) { hd.setAttribute('tabindex', '-1'); hd.focus(); }
+  }
+
+  /* ---------------- products & quantities ---------------- */
+
+  /** Products to show: available ones, plus any already in the order being edited. */
+  function visibleProducts() {
+    var list = S.data.products.slice();
+    if (S.editing) {
+      S.editing.items.forEach(function (l) {
+        if (!list.some(function (p) { return p.id === l.productId; })) {
+          list.push({ id: l.productId, name: l.name, price: l.unitPrice, available: false, allergens: '', dietaryTags: [], description: '', imageUrl: '', left: 0, notOffered: true });
+        }
+      });
+    }
+    return list;
+  }
+  function originalQty(id) {
+    if (!S.editing) return 0;
+    return S.editing.items.filter(function (l) { return l.productId === id; }).reduce(function (n, l) { return n + l.quantity; }, 0);
+  }
+  function unitPrice(p) {
+    var orig = S.editing && S.editing.items.filter(function (l) { return l.productId === p.id; })[0];
+    return orig ? orig.unitPrice : p.price;
+  }
+  /** Highest quantity allowed for a product right now. */
+  function maxFor(p) {
+    var r = S.data.rules;
+    var orig = originalQty(p.id);
+    var max = r.maxPerProduct;
+    if (p.notOffered || !p.available) max = Math.min(max, orig);
+    if (p.left !== null && p.left !== undefined) max = Math.min(max, p.left + orig);
+    if (S.editing && !S.editing.rules.canIncrease) max = Math.min(max, orig);
+    return Math.max(0, max);
+  }
+  function minFor(p) {
+    return (S.editing && !S.editing.rules.canDecrease) ? originalQty(p.id) : 0;
+  }
+  function totalQty() { return Object.keys(S.qty).reduce(function (n, k) { return n + (S.qty[k] || 0); }, 0); }
+  function totalCost() {
+    return visibleProducts().reduce(function (c, p) { return c + App.cents(unitPrice(p)) * (S.qty[p.id] || 0); }, 0) / 100;
+  }
+
+  function setQty(p, q, quiet) {
+    q = Math.floor(Number(q));
+    if (!isFinite(q) || q < 0) q = 0;
+    var max = maxFor(p), min = minFor(p);
+    if (q > max) { q = max; if (!quiet) App.toast(max === 0 ? t('soldOutToday') : t('qtyLabel', { name: p.name }) + ': max ' + max, 'error'); }
+    if (q < min) { q = min; if (!quiet && S.editing) App.toast(S.editing.rules.message, 'error'); }
+    var others = totalQty() - (S.qty[p.id] || 0);
+    if (others + q > S.data.rules.maxPerOrder) {
+      q = Math.max(min, S.data.rules.maxPerOrder - others);
+      if (!quiet) App.toast('Max ' + S.data.rules.maxPerOrder + ' ' + t('cookies'), 'error');
+    }
+    S.qty[p.id] = q;
+    refreshQty(p);
+  }
+
+  function refreshQty(p) {
+    var input = document.getElementById('qty-' + cssId(p.id));
+    if (input) input.value = String(S.qty[p.id] || 0);
+    var minus = document.getElementById('minus-' + cssId(p.id));
+    var plus = document.getElementById('plus-' + cssId(p.id));
+    if (minus) minus.disabled = (S.qty[p.id] || 0) <= minFor(p);
+    if (plus) plus.disabled = (S.qty[p.id] || 0) >= maxFor(p);
+    var tot = document.getElementById('runningTotal');
+    if (tot) tot.textContent = App.money(totalCost());
+    var cnt = document.getElementById('runningCount');
+    if (cnt) cnt.textContent = totalQty() + ' ' + (totalQty() === 1 ? t('cookie') : t('cookies'));
+    var go = document.getElementById('pickContinue');
+    if (go) go.disabled = totalQty() === 0;
+  }
+
+  function cssId(id) { return String(id).replace(/[^A-Za-z0-9_-]/g, '_'); }
+
+  function productFacts(p) {
+    return h('dl', { class: 'facts' },
+      h('div', null, h('dt', null, t('allergens') + ':'), h('dd', null, p.allergens || t('noAllergens'))),
+      p.dietaryTags && p.dietaryTags.length ? h('div', null, h('dt', null, t('dietary') + ':'), h('dd', null, p.dietaryTags.map(function (tag) { return h('span', { class: 'tag' }, tag); }))) : null);
+  }
+
+  function stockNote(p) {
+    if (p.left === null || p.left === undefined || p.notOffered) return null;
+    if (p.left === 0 && !originalQty(p.id)) return h('span', { class: 'stock out' }, '⛔ ' + t('soldOutToday'));
+    if (p.lowStock) return h('span', { class: 'stock' }, '⚠ ' + t('leftToday', { n: p.left }));
+    return null;
+  }
+
+  function stepper(p, big) {
+    var input = h('input', { type: 'number', id: 'qty-' + cssId(p.id), inputmode: 'numeric', min: '0', max: String(maxFor(p)), step: '1',
+      value: String(S.qty[p.id] || 0), 'aria-label': t('qtyLabel', { name: p.name }),
+      onchange: function (e) { setQty(p, e.target.value); } });
+    var el = h('div', { class: big ? 'big-stepper' : 'stepper' },
+      h('button', { type: 'button', id: 'minus-' + cssId(p.id), 'aria-label': t('fewer', { name: p.name }), onclick: function () { setQty(p, (S.qty[p.id] || 0) - 1); } }, '−'),
+      input,
+      h('button', { type: 'button', id: 'plus-' + cssId(p.id), 'aria-label': t('more', { name: p.name }), onclick: function () { setQty(p, (S.qty[p.id] || 0) + 1); } }, '+'));
+    return el;
+  }
+
+  function productImage(p) {
+    return p.imageUrl ? h('img', { src: p.imageUrl, alt: p.name, loading: 'lazy' }) : h('div', { class: 'emoji', 'aria-hidden': 'true' }, '🍪');
+  }
+
+  /* ---------------- step 1: pick ---------------- */
+
+  function editBanner() {
+    if (S.mode !== 'edit' || !S.editing) return null;
+    return h('div', { class: 'alert info' },
+      h('strong', null, t('editing', { n: S.editing.orderNumber }) + '. '),
+      t('editRules', { until: S.data.rules.editUntil, from: S.data.rules.noDecreaseFrom }),
+      S.editing.rules.message ? h('div', { style: 'margin-top:6px;font-weight:700' }, S.editing.rules.message) : null);
+  }
+
+  function renderPick() {
+    var products = visibleProducts();
+    var single = products.length === 1;
+    var first = (S.details.name || '').split(' ')[0];
+    var list = products.map(function (p) {
+      var was = originalQty(p.id);
+      return h('article', { class: 'panel product', 'aria-label': p.name },
+        productImage(p),
+        h('div', null,
+          h('h3', null, p.name),
+          h('div', { class: 'price' }, App.money(unitPrice(p)) + ' ' + t('each')),
+          p.description ? h('p', { class: 'muted', style: 'margin:4px 0' }, p.description) : null,
+          productFacts(p),
+          stockNote(p),
+          S.editing && was ? h('div', { class: 'small muted' }, t('was', { n: was })) : null,
+          single ? stepper(p, true) : null),
+        single ? null : stepper(p, false));
+    });
+    App.clear(app).appendChild(h('div', null,
+      editBanner(),
+      S.note ? h('div', { class: 'alert info' }, S.note) : null,
+      S.mode === 'order' ? h('div', { class: 'hero' }, h('p', { style: 'margin:0' }, t('hello', { name: first || '' }).replace(', !', '!')), h('h2', null, single ? t('pickCookie') : t('pickCookies'))) : h('h2', null, single ? t('pickCookie') : t('pickCookies')),
+      h('div', { class: single ? 'single' : 'multi' }, list),
+      h('div', { class: 'totalbar' },
+        h('div', null, h('div', { class: 'small muted', id: 'runningCount' }), h('div', { class: 'amt', id: 'runningTotal', 'aria-live': 'polite' })),
+        h('div', { class: 'spacer' }),
+        h('button', { type: 'button', class: 'btn primary', id: 'pickContinue', onclick: function () {
+          if (!totalQty()) { App.toast(t('pickCookie'), 'error'); return; }
+          go('details');
+        } }, t('continue')))));
+    products.forEach(refreshQty);
+  }
+
+  /* ---------------- step 2: details ---------------- */
+
+  function roomError(v) {
+    var r = String(v || '').toUpperCase().replace(/\s+/g, ' ').trim();
+    var rules = S.data.rules;
+    if (!r) return t('roomRequired');
+    if (r.length > rules.limits.ROOM_MAX || !/^[A-Z0-9 .\-]+$/.test(r)) return t('roomInvalid');
+    if (rules.namedRooms.indexOf(r) !== -1) return '';
+    var re;
+    try { re = new RegExp(rules.roomPattern); } catch (e) { re = /^[A-Z]?[0-9]{1,4}[A-Z]?$/; }
+    return re.test(r) ? '' : t('roomInvalid');
+  }
+
+  function field(id, label, input, hint, required) {
+    return h('div', { class: 'field' },
+      h('label', { for: id }, label, required ? h('span', { class: 'muted small' }, ' ' + t('required')) : null),
+      input,
+      hint ? h('div', { class: 'hint', id: id + '-hint' }, hint) : null,
+      h('div', { class: 'field-error', id: id + '-err', role: 'alert' }));
+  }
+
+  function renderDetails() {
+    var d = S.details;
+    var r = S.data.rules;
+    var bind = function (key) { return function (e) { d[key] = e.target.value; e.target.removeAttribute('aria-invalid'); var er = document.getElementById(e.target.id + '-err'); if (er) er.textContent = ''; }; };
+    var nameIn = h('input', { type: 'text', id: 'f-name', autocomplete: 'name', maxlength: String(r.limits.NAME_MAX), value: d.name, required: true, 'aria-describedby': 'f-name-err', oninput: bind('name') });
+    var roomIn = h('input', { type: 'text', id: 'f-room', autocapitalize: 'characters', maxlength: String(r.limits.ROOM_MAX), value: d.room, required: true, 'aria-describedby': 'f-room-hint f-room-err', oninput: bind('room') });
+    var classIn = h('input', { type: 'text', id: 'f-class', maxlength: String(r.limits.CLASS_MAX), value: d.classOrNote, 'aria-describedby': 'f-class-hint', oninput: bind('classOrNote') });
+    var instrIn = h('textarea', { id: 'f-instr', maxlength: String(r.limits.INSTRUCTIONS_MAX), 'aria-describedby': 'f-instr-hint', oninput: bind('instructions') });
+    instrIn.value = d.instructions;
+    var winSel = null;
+    if (r.windows.length) {
+      winSel = h('select', { id: 'f-window', onchange: bind('deliveryWindow') },
+        h('option', { value: '' }, t('noPreference')),
+        r.windows.map(function (w) { var o = h('option', { value: w }, w); if (w === d.deliveryWindow) o.selected = true; return o; }));
+    }
+    var allergy = h('input', { type: 'checkbox', id: 'f-allergy', checked: d.allergy, 'aria-describedby': 'f-allergy-hint', onchange: function (e) { d.allergy = e.target.checked; } });
+    var acctIn = h('input', { type: 'text', id: 'f-account', maxlength: String(r.limits.ACCOUNT_MAX), value: d.accountName, oninput: bind('accountName') });
+    var acctBox = h('div', { hidden: d.payment !== 'Account' }, field('f-account', t('accountName'), acctIn, null, true));
+    var payErr = h('div', { class: 'field-error', role: 'alert' });
+    function payChoice(value, label) {
+      return h('label', { class: 'choice' },
+        h('input', { type: 'radio', name: 'pay', value: value, checked: d.payment === value, onchange: function () { d.payment = value; acctBox.hidden = value !== 'Account'; payErr.textContent = ''; } }),
+        h('span', null, label));
+    }
+    var form = h('form', { class: 'panel', novalidate: true, onsubmit: function (e) {
+      e.preventDefault();
+      var bad = null;
+      var setErr = function (id, msg) { var el = document.getElementById(id + '-err'); el.textContent = msg; document.getElementById(id).setAttribute('aria-invalid', 'true'); if (!bad) bad = document.getElementById(id); };
+      if (!d.name.trim()) setErr('f-name', t('nameRequired'));
+      var re = roomError(d.room); if (re) setErr('f-room', re);
+      if (!d.payment) { payErr.textContent = t('payRequired'); if (!bad) bad = form.querySelector('input[name=pay]'); }
+      if (d.payment === 'Account' && !d.accountName.trim()) setErr('f-account', t('accountRequired'));
+      if (bad) { bad.focus(); return; }
+      d.room = d.room.toUpperCase().replace(/\s+/g, ' ').trim();
+      App.store.set('cookie_room', d.room);
+      go('review');
+    } },
+      h('h2', null, t('detailsHeading')),
+      field('f-room', t('room'), roomIn, t('roomHint'), true),
+      field('f-name', t('yourName'), nameIn, null, true),
+      field('f-class', t('klass'), classIn, t('klassHint')),
+      winSel ? field('f-window', t('window'), winSel) : null,
+      field('f-instr', t('instructions'), instrIn, t('instructionsHint')),
+      h('div', { class: 'field' }, h('label', { class: 'check', for: 'f-allergy' }, allergy, t('allergyFlag')), h('div', { class: 'hint', id: 'f-allergy-hint' }, t('allergyHint'))),
+      h('fieldset', null, h('legend', null, t('payment')),
+        h('div', { class: 'choices' }, payChoice('Cash', t('payCash')), payChoice('Card', t('payCard')), r.allowAccount ? payChoice('Account', r.accountLabel) : null),
+        payErr, h('p', { class: 'hint' }, t('payNote'))),
+      acctBox,
+      h('div', { class: 'row' },
+        h('button', { type: 'button', class: 'btn', onclick: function () { go('pick'); } }, t('back')),
+        h('div', { class: 'spacer' }),
+        h('button', { type: 'submit', class: 'btn primary' }, t('review'))));
+    App.clear(app).appendChild(h('div', null, editBanner(), form));
+  }
+
+  /* ---------------- step 3: review & submit ---------------- */
+
+  function summaryTable(items, total, showWas) {
+    return h('table', { class: 'summary' }, h('caption', { class: 'sr-only' }, t('reviewHeading')),
+      h('tbody', null,
+        items.map(function (l) {
+          var was = showWas ? originalQty(l.productId) : null;
+          return h('tr', null,
+            h('td', null, l.quantity + ' × ' + l.name, was !== null && was !== l.quantity ? h('span', { class: 'small muted' }, ' (' + t('was', { n: was }) + ')') : null),
+            h('td', { class: 'num' }, App.money(App.cents(l.unitPrice) * l.quantity / 100)));
+        }),
+        h('tr', { class: 'total' }, h('td', null, t('total')), h('td', { class: 'num' }, App.money(total)))));
+  }
+
+  function currentItems() {
+    return visibleProducts().filter(function (p) { return S.qty[p.id] > 0; })
+      .map(function (p) { return { productId: p.id, name: p.name, unitPrice: unitPrice(p), quantity: S.qty[p.id] }; });
+  }
+
+  function renderReview() {
+    var d = S.details;
+    var items = currentItems();
+    if (S.editing) {   // show removed cookies as "0 (was N)"
+      S.editing.items.forEach(function (l) {
+        if (!items.some(function (i) { return i.productId === l.productId; })) items.push({ productId: l.productId, name: l.name, unitPrice: l.unitPrice, quantity: 0 });
+      });
+    }
+    var err = h('div', { class: 'alert error', role: 'alert', hidden: true });
+    var btn = h('button', { type: 'button', class: 'btn primary block' }, S.mode === 'edit' ? t('saveChanges') : t('submit'));
+    btn.addEventListener('click', function () { submit(btn, err); });
+    var change = function (step) { return h('button', { type: 'button', class: 'linkbtn', onclick: function () { go(step); } }, t('change')); };
+    var payLabel = d.payment === 'Account' ? S.data.rules.accountLabel + ' (' + d.accountName + ')' : d.payment;
+    App.clear(app).appendChild(h('div', null, editBanner(), h('section', { class: 'panel' },
+      h('h2', null, t('reviewHeading')),
+      summaryTable(items, totalCost(), !!S.editing),
+      change('pick'),
+      h('dl', { class: 'kv' },
+        h('dt', null, t('room')), h('dd', null, d.room, ' ', change('details')),
+        h('dt', null, t('yourName')), h('dd', null, d.name),
+        d.classOrNote ? [h('dt', null, t('klass')), h('dd', null, d.classOrNote)] : null,
+        d.deliveryWindow ? [h('dt', null, t('window')), h('dd', null, d.deliveryWindow)] : null,
+        d.instructions ? [h('dt', null, t('instructions')), h('dd', null, d.instructions)] : null,
+        d.allergy ? [h('dt', null, '⚠'), h('dd', null, t('allergyFlag'))] : null,
+        h('dt', null, t('payment')), h('dd', null, payLabel)),
+      err, btn)));
+  }
+
+  function payload() {
+    var d = S.details;
+    return {
+      items: visibleProducts().map(function (p) { return { productId: p.id, quantity: S.qty[p.id] || 0 }; }).filter(function (i) { return i.quantity > 0 || originalQty(i.productId) > 0; }),
+      name: d.name.trim(), room: d.room, classOrNote: d.classOrNote, instructions: d.instructions,
+      deliveryWindow: d.deliveryWindow, allergy: d.allergy, payment: d.payment, accountName: d.accountName,
+      requestId: S.requestId
+    };
+  }
+
+  function submit(btn, err) {
+    if (S.busy) return;                      // double-submit guard
+    S.busy = true;
+    btn.disabled = true;
+    btn.textContent = S.mode === 'edit' ? t('saving') : t('submitting');
+    err.hidden = true;
+    var p = S.mode === 'edit'
+      ? App.call('editOrder', S.editing.orderNumber, S.token, S.editing.version, payload())
+      : App.call('submitOrder', payload());
+    p.then(function (res) {
+      S.busy = false;
+      renderDone(res);
+    }).catch(function (e) {
+      S.busy = false;
+      btn.disabled = false;
+      btn.textContent = S.mode === 'edit' ? t('saveChanges') : t('submit');
+      err.textContent = e.message;
+      err.hidden = false;
+      err.focus && err.scrollIntoView({ block: 'center' });
+      if (S.mode === 'edit' && /changed since you opened/i.test(e.message)) {
+        App.call('getOrderForEdit', S.editing.orderNumber, S.token).then(function (o) { loadEditState(o); });
+      }
+    });
+  }
+
+  function renderDone(res) {
+    var edited = S.mode === 'edit';
+    App.clear(app).appendChild(h('section', { class: 'panel center', role: 'status' },
+      h('h2', null, edited ? t('updated') : t('received')),
+      h('p', { class: 'muted' }, t('orderNumberIs')),
+      h('div', { class: 'big-number' }, '#' + res.orderNumber),
+      h('div', { style: 'text-align:left' }, summaryTable(res.items, res.total, false)),
+      h('p', { style: 'margin-top:12px' }, h('strong', null, t('room') + ' ' + res.room), ' · ' + res.payment),
+      h('p', { class: 'small muted' }, res.emailSent ? t('emailSent', { email: S.data.user.email }) : t('emailNotSent')),
+      h('div', { class: 'row', style: 'justify-content:center' },
+        h('button', { type: 'button', class: 'btn', onclick: function () { showTab('mine'); } }, t('viewMyOrders')),
+        h('button', { type: 'button', class: 'btn primary', onclick: function () { reloadThen(startNew); } }, t('newOrder')))));
+    var hd = app.querySelector('h2'); if (hd) { hd.setAttribute('tabindex', '-1'); hd.focus(); }
+    App.announce((edited ? t('updated') : t('received')) + ' #' + res.orderNumber);
+  }
+
+  /** Refreshes availability (daily limits) before starting something new. */
+  function reloadThen(fn) {
+    App.call('getCustomerBootstrap').then(function (data) { S.data = data; fn(); }).catch(function () { fn(); });
+  }
+
+  function renderClosed() {
+    var o = S.data.ordering;
+    App.clear(app).appendChild(h('section', { class: 'panel center' },
+      h('h2', null, t('closedHeading')),
+      h('p', null, o.message),
+      o.reopensAt ? h('p', { class: 'muted' }, App.dateTime(o.reopensAt)) : null,
+      h('div', { class: 'row', style: 'justify-content:center' },
+        h('button', { type: 'button', class: 'btn', onclick: function () { showTab('mine'); } }, t('viewMyOrders')),
+        h('button', { type: 'button', class: 'btn primary', onclick: function () { init(); } }, t('checkAgain')))));
+  }
+
+  /* ---------------- edit / cancel / reorder ---------------- */
+
+  function loadEditState(o) {
+    S.mode = 'edit';
+    S.editing = o;
+    S.qty = {};
+    o.items.forEach(function (l) { S.qty[l.productId] = (S.qty[l.productId] || 0) + l.quantity; });
+    var acct = /^Account: /.test(o.payment) ? o.payment.replace(/^Account: /, '') : '';
+    S.details = { name: o.customerName, room: o.room, classOrNote: o.classOrNote, instructions: o.instructions,
+      deliveryWindow: o.deliveryWindow, allergy: o.allergy, payment: acct ? 'Account' : o.payment, accountName: acct };
+  }
+
+  function openEdit(orderNumber, token) {
+    App.clear(app).appendChild(App.loading());
+    S.token = token || '';
+    App.call('getOrderForEdit', orderNumber, S.token).then(function (o) {
+      loadEditState(o);
+      go('pick');
+    }).catch(function (err) { App.clear(app).appendChild(App.errorPanel(err.message, null)); });
+  }
+
+  function openCancelLink(orderNumber, token) {
+    App.clear(app).appendChild(App.loading());
+    App.call('getOrderForEdit', orderNumber, token).then(function (o) {
+      var err = h('div', { class: 'alert error', role: 'alert', hidden: true });
+      var btn = h('button', { type: 'button', class: 'btn danger solid', disabled: !o.rules.canCancel }, t('cancelOrder'));
+      btn.addEventListener('click', function () {
+        btn.disabled = true;
+        App.call('cancelMyOrder', o.orderNumber, token).then(function () {
+          App.clear(app).appendChild(h('section', { class: 'panel center', role: 'status' }, h('h2', null, t('cancelled', { n: o.orderNumber })),
+            h('button', { type: 'button', class: 'btn primary', onclick: function () { reloadThen(startNew); } }, t('newOrder'))));
+        }).catch(function (e) { btn.disabled = false; err.textContent = e.message; err.hidden = false; });
+      });
+      App.clear(app).appendChild(h('section', { class: 'panel' },
+        h('h2', null, t('linkCancelHeading', { n: o.orderNumber })),
+        summaryTable(o.items, o.total, false),
+        h('p', null, t('room') + ' ' + o.room),
+        o.rules.canCancel ? h('p', null, t('cancelConfirmBody')) : h('div', { class: 'alert warn' }, o.rules.message),
+        err,
+        h('div', { class: 'row' },
+          h('button', { type: 'button', class: 'btn', onclick: function () { showTab('mine'); } }, t('keepOrder')),
+          o.rules.canCancel ? btn : null)));
+      var hd = app.querySelector('h2'); if (hd) { hd.setAttribute('tabindex', '-1'); hd.focus(); }
+    }).catch(function (err) { App.clear(app).appendChild(App.errorPanel(err.message, null)); });
+  }
+
+  function reorder(o) {
+    reloadThen(function () {
+      S.mode = 'order'; S.editing = null; S.token = ''; S.requestId = App.uuid();
+      S.qty = {};
+      var lowered = false;
+      o.items.forEach(function (l) {
+        var p = S.data.products.filter(function (x) { return x.id === l.productId; })[0];
+        if (!p) { lowered = true; return; }
+        var q = Math.min(l.quantity, maxFor(p));
+        if (q < l.quantity) lowered = true;
+        if (q > 0) S.qty[p.id] = q;
+      });
+      var acct = /^Account: /.test(o.payment) ? o.payment.replace(/^Account: /, '') : '';
+      S.details = { name: o.customerName, room: o.room, classOrNote: o.classOrNote, instructions: o.instructions, deliveryWindow: o.deliveryWindow,
+        allergy: o.allergy, payment: acct ? 'Account' : o.payment, accountName: acct };
+      S.note = t('reorderNote') + (lowered ? ' ' + t('reorderChanged') : '');
+      document.getElementById('tab-order').setAttribute('aria-selected', 'true');
+      document.getElementById('tab-mine').setAttribute('aria-selected', 'false');
+      if (!S.data.ordering.open) return renderClosed();
+      go('pick');
+    });
+  }
+
+  /* ---------------- My orders ---------------- */
+
+  function renderMyOrders() {
+    App.clear(app).appendChild(App.loading());
+    App.call('getMyOrders').then(function (orders) {
+      App.clear(app).appendChild(h('div', null, h('h2', null, t('myOrdersHeading')),
+        !orders.length ? h('div', { class: 'panel empty' }, t('noOrders')) : null,
+        orders.map(function (o) {
+          var r = o.rules || {};
+          return h('article', { class: 'order-item', 'aria-label': '#' + o.orderNumber },
+            h('div', { class: 'head' }, h('span', { class: 'num' }, '#' + o.orderNumber), App.statusBadge(o.status),
+              h('span', { class: 'spacer' }), h('span', { class: 'small muted' }, t('placedAt', { time: App.dateTime(o.createdAt) }))),
+            h('p', { style: 'margin:6px 0' }, o.items.map(function (l) { return l.quantity + ' × ' + l.name; }).join(', ') + ' · ' + App.money(o.total) + ' · ' + t('room') + ' ' + o.room),
+            r.message && CONFIG_ACTIVE.indexOf(o.status) !== -1 ? h('p', { class: 'small muted' }, r.message) : null,
+            h('div', { class: 'row' },
+              r.canEdit ? h('button', { type: 'button', class: 'btn small', onclick: function () { S.token = ''; loadEditState(o); setTab('order'); go('pick'); } }, t('edit')) : null,
+              r.canCancel ? h('button', { type: 'button', class: 'btn small danger', onclick: function () {
+                App.confirm(t('cancelConfirmTitle', { n: o.orderNumber }), t('cancelConfirmBody'), t('cancelOrder'), true).then(function (ok) {
+                  if (!ok) return;
+                  App.call('cancelMyOrder', o.orderNumber, '').then(function () { App.toast(t('cancelled', { n: o.orderNumber }), 'ok'); renderMyOrders(); })
+                    .catch(function (e) { App.toast(e.message, 'error'); });
+                });
+              } }, t('cancelOrder')) : null,
+              h('button', { type: 'button', class: 'btn small', onclick: function () { reorder(o); } }, t('reorder'))));
+        })));
+    }).catch(function (err) { App.clear(app).appendChild(App.errorPanel(err.message, renderMyOrders)); });
+  }
+  var CONFIG_ACTIVE = ['Received', 'Preparing', 'Out for Delivery'];
+
+  function setTab(name) {
+    ['order', 'mine'].forEach(function (n) {
+      var tab = document.getElementById('tab-' + n);
+      tab.setAttribute('aria-selected', String(n === name));
+      tab.tabIndex = n === name ? 0 : -1;
+    });
+  }
+
+  init();
+})();
+</script>

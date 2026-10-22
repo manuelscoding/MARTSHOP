@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <?!= include('Styles'); ?>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to main content</a>
+  <header class="topbar">
+    <h1><?= title ?></h1>
+    <span id="conn" class="conn" role="status">…</span>
+    <span id="userEmail" class="user"></span>
+  </header>
+  <nav class="tabs" role="tablist" aria-label="Dashboard sections" id="tabs"></nav>
+  <main id="main" class="page wide" tabindex="-1">
+    <div id="staleBanner"></div>
+    <section id="panel-orders" role="tabpanel" aria-labelledby="tab-orders">
+      <div id="prep"></div>
+      <div class="filters">
+        <div><label for="fStatus" id="fStatusLabel"></label><select id="fStatus"></select></div>
+        <div><label for="fText" id="fTextLabel"></label><input type="search" id="fText" maxlength="60"></div>
+        <div><label for="fDate" id="fDateLabel"></label><input type="date" id="fDate"></div>
+      </div>
+      <div id="orders" class="orders-grid"><div class="loading" role="status"><div class="spinner" aria-hidden="true"></div><span>Loading…</span></div></div>
+    </section>
+    <section id="panel-route" role="tabpanel" aria-labelledby="tab-route" hidden></section>
+    <section id="panel-history" role="tabpanel" aria-labelledby="tab-history" hidden></section>
+    <section id="panel-reports" role="tabpanel" aria-labelledby="tab-reports" hidden></section>
+    <section id="panel-controls" role="tabpanel" aria-labelledby="tab-controls" hidden></section>
+  </main>
+  <footer class="page wide small muted" style="padding-top:0"><span id="appVersion"></span></footer>
+  <div id="announcer" class="sr-only" role="status" aria-live="polite"></div>
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+  <div id="printArea" aria-hidden="true"></div>
+  <noscript><p class="panel">The dashboard needs JavaScript. Please enable it and reload.</p></noscript>
+  <script>window.BOOT = <?!= bootJson ?>;</script>
+  <?!= include('Scripts'); ?>
+  <?!= include('DashboardJs'); ?>
+</body>
+</html>

@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <?!= include('Styles'); ?>
+</head>
+<body>
+  <a class="skip" href="#app">Skip to main content</a>
+  <header class="topbar">
+    <h1><?= title ?></h1>
+    <a id="dashLink" hidden></a>
+    <span id="userEmail" class="user"></span>
+  </header>
+  <nav class="tabs" role="tablist" aria-label="Sections">
+    <button type="button" role="tab" id="tab-order" aria-selected="true" aria-controls="app"></button>
+    <button type="button" role="tab" id="tab-mine" aria-selected="false" aria-controls="app" tabindex="-1"></button>
+  </nav>
+  <main id="app" class="page" tabindex="-1">
+    <div class="loading" role="status"><div class="spinner" aria-hidden="true"></div><span>Loading…</span></div>
+  </main>
+  <footer class="page small muted" style="padding-top:0"><span id="appVersion"></span></footer>
+  <div id="announcer" class="sr-only" role="status" aria-live="polite"></div>
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+  <div id="printArea" aria-hidden="true"></div>
+  <noscript><p class="panel">This app needs JavaScript. Please enable it and reload.</p></noscript>
+  <script>window.BOOT = <?!= bootJson ?>;</script>
+  <?!= include('Scripts'); ?>
+  <?!= include('CustomerJs'); ?>
+</body>
+</html>

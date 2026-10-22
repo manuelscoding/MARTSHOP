@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <?!= include('Styles'); ?>
+</head>
+<body>
+  <main class="page narrow">
+    <section class="panel center" role="alert">
+      <h1><?= heading ?></h1>
+      <p><?= message ?></p>
+      <? if (homeUrl) { ?>
+        <p><a class="btn primary" href="<?= homeUrl ?>">Go to the ordering page</a></p>
+      <? } ?>
+    </section>
+  </main>
+</body>
+</html>

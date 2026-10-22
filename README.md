@@ -5,6 +5,8 @@ A web app for a school coffee shop run by staff. It uses a Google Sheet as the d
 - **Customers** (teachers and staff, and later students) order from the menu. They choose delivery (to a room) or pickup, and cash or card. They get an order number and a confirmation email.
 - **Shop staff** use a live dashboard on a tablet at the counter. From it they start, complete or cancel orders, handle items that have run out, search history, and turn menu items on or off.
 
+> **Also in this repository:** [Cookie Cart](cookie-cart/README.md), a separate app for ordering cookies delivered to classrooms. It has its own Sheet, deployment and docs.
+
 ## Documentation
 
 | Document | For |
