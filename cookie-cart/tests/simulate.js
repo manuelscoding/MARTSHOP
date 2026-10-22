@@ -826,4 +826,71 @@ test('security: special IDs never match built-in properties; staff-tab Role must
   assert.strictEqual(g.__errors.filter(e => !/quota|Oven/.test(e)).length, 0, 'unexpected errors logged: ' + g.__errors.join('\n'));
 });
 
+test('dashboard access: ONLY Staff-tab rows with Role Admin or Staff, on a school domain, revoked on removal', () => {
+  const DENIED = /only for Cookie Cart staff|does not have access|sign in/;
+  // Every server function the dashboard can call (each must re-check the caller).
+  const staffCalls = {
+    getDashboardBootstrap: () => g.getDashboardBootstrap(),
+    getDashboard: () => g.getDashboard(''),
+    staffUpdateStatus: () => g.staffUpdateStatus(999999, 'prepare'),
+    acknowledgeChange: () => g.acknowledgeChange(999999),
+    getHistory: () => g.getHistory({}),
+    getOrderLog: () => g.getOrderLog(1),
+    getDaySummary: () => g.getDaySummary(''),
+    setOrderingEnabled: () => g.setOrderingEnabled(true),
+    setProductAvailable: () => g.setProductAvailable('CHOC_CHIP', true),
+    setProductDailyLimit: () => g.setProductDailyLimit('CHOC_CHIP', 0)
+  };
+  // The guard list must cover every browser-callable dashboard function in the code.
+  const src = fs.readFileSync(path.join(srcDir, 'DashboardData.gs'), 'utf8') + fs.readFileSync(path.join(srcDir, 'Products.gs'), 'utf8') +
+    fs.readFileSync(path.join(srcDir, 'Orders.gs'), 'utf8');
+  const staffFns = [...src.matchAll(/^function ([A-Za-z0-9]+)\([^)]*\) \{\n  return api_\('[A-Za-z]+', function \(\) \{\n    (?:var ctx = )?requireStaff_\(\)/gm)].map(m => m[1]);
+  same(staffFns.slice().sort(), Object.keys(staffCalls).sort(), 'dashboard function list changed: update this test');
+
+  const allowed = (who) => {
+    as(who);
+    assert.strictEqual(g.doGet({ parameter: { page: 'dashboard' } }).file, 'Dashboard', who + ' should open the dashboard page');
+    Object.keys(staffCalls).forEach(fn => { as(who); const r = staffCalls[fn](); assert.ok(r.ok || !DENIED.test(r.error), who + ' denied ' + fn + ': ' + r.error); });
+  };
+  const denied = (who) => {
+    as(who);
+    const page = g.doGet({ parameter: { page: 'dashboard' } });
+    assert.notStrictEqual(page.file, 'Dashboard', who + ' got the dashboard page');
+    Object.keys(staffCalls).forEach(fn => { as(who); fail(staffCalls[fn](), DENIED); });
+    // and the order page shows no dashboard link
+    as(who);
+    const b = g.getCustomerBootstrap();
+    if (b.ok) assert.strictEqual(b.data.user.isStaff, false, who + ' would see the dashboard link');
+  };
+
+  sheets.Staff.data.push(['  Mixed.Case@School.org ', 'Admin Two', ' admin ']);
+  sheets.Staff.data.push(['outsider.staff@gmail.com', 'Outside', 'Admin']);       // not a school domain
+  sheets.Staff.data.push(['7654321@school.org', 'Student Admin?', 'Admin']);      // student pattern
+  sheets.Staff.data.push(['typo@school.org', 'Typo', 'Admn']);
+  sheets.Staff.data.push(['nomail', 'No email', 'Admin']);
+  cacheMap.delete('staff_v1');
+
+  allowed(ADMIN);                         // Role Admin (setup owner)
+  allowed(STAFF);                         // Role Staff
+  allowed('mixed.case@school.org');       // spaces / capitals in the Sheet are tolerated
+  [TEACHER, OTHER_TEACHER, OUTSIDER, STUDENT, '7654321@school.org', 'outsider.staff@gmail.com', 'typo@school.org',
+    'blank.role@school.org', 'viewer@school.org', ''].forEach(denied);
+
+  // Removing someone from the Staff tab revokes access at once (onEdit clears the cache),
+  // even for a dashboard that is already open and polling.
+  as(STAFF); const v = ok(g.getDashboard('')).version;
+  sheets.Staff.data = sheets.Staff.data.filter(r => r[0] !== STAFF);
+  g.onEdit({ range: { getSheet: () => ({ getName: () => 'Staff' }) } });
+  as(STAFF);
+  fail(g.getDashboard(v), DENIED);
+  denied(STAFF);
+  // Demoting a role works the same way.
+  sheets.Staff.data.forEach(r => { if (r[0] === '  Mixed.Case@School.org ') r[2] = ''; });
+  g.onEdit({ range: { getSheet: () => ({ getName: () => 'Staff' }) } });
+  denied('mixed.case@school.org');
+  // A forged "role" in the request changes nothing: roles come only from the Sheet.
+  as(TEACHER);
+  fail(g.getDashboard({ role: 'Admin' }), DENIED);
+});
+
 console.info('\nAll ' + passed + ' Cookie Cart simulated flows passed.');
