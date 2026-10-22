@@ -87,7 +87,7 @@ cookie-cart/
     Auth.gs               who is signed in (teacher/student/staff), ordering hours
     Products.gs           reads the Products tab (scales to any number of cookies), sold-out/limit controls
     Orders.gs             place, edit, cancel; edit rules; staff status changes; acknowledge
-    Dashboard.gs          dashboard data, prep summary, history, change log, day summary, jobs
+    DashboardData.gs        dashboard data, prep summary, history, change log, day summary, jobs
     Email.gs              confirmation / updated / cancelled / staff alert / summary emails
     Setup.gs              setup(), health check, triggers, Sheet menu, reset for go-live
     Code.gs               doGet routing (order page, dashboard, email links)

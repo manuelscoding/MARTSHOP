@@ -23,10 +23,10 @@ Allow about 20 minutes. You need a Google Workspace account on your school domai
 
    | Type | Names |
    |---|---|
-   | Script | `Code` (already exists; replace its contents), `Config`, `Strings`, `Util`, `Auth`, `Products`, `Orders`, `Dashboard`, `Email`, `Setup` |
+   | Script | `Code` (already exists; replace its contents), `Config`, `Strings`, `Util`, `Auth`, `Products`, `Orders`, `DashboardData`, `Email`, `Setup` |
    | HTML | `Customer`, `CustomerJs`, `Dashboard`, `DashboardJs`, `Styles`, `Scripts`, `Message` |
 
-   > There is a `Dashboard` **Script** *and* a `Dashboard` **HTML** file. Apps Script allows this because the extensions differ. Create both.
+   > Every file name must be unique in the project, even between Script and HTML files. The dashboard's server code is `DashboardData` (Script) and its page is `Dashboard` (HTML).
 
 5. Open `appsscript.json` and replace its contents with `cookie-cart/src/appsscript.json`.
    - Change `"timeZone"` if your school is not on `America/New_York` (e.g. `America/Chicago`). Cutoff times and "today" use this zone.
@@ -166,4 +166,5 @@ Current numbers: <https://developers.google.com/apps-script/guides/services/quot
 | Teachers can't add cookies | It is after `ORDER_CUTOFF_TIME` and `ALLOW_INCREASE_AFTER_CUTOFF` is FALSE (by design), or the daily limit is reached. |
 | Changes in the Sheet don't show | They show within seconds. If not, **Cookie Cart → Clear cache**. |
 | Dashboard shows a red "may be out of date" banner | The tablet lost Wi-Fi. It recovers by itself; or tap **Reload**. |
+| "Something went wrong" when opening `?page=dashboard`, and the Errors tab says *No HTML file named Dashboard* | The `Dashboard` **HTML** file is missing. Versions before 1.0.1 named the server file `Dashboard` too, which Apps Script doesn't allow. Rename the **Script** file `Dashboard` to `DashboardData`, add an **HTML** file named `Dashboard` with the contents of `src/Dashboard.html`, then publish a new version. |
 | Something else | Check the **Errors** tab and **Executions** in the Apps Script editor. |

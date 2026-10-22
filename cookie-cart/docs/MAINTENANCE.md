@@ -6,7 +6,7 @@ Written for whoever looks after the app next, including someone who has never se
 
 ```
 Teacher's browser ──google.script.run──►  Orders.gs / Products.gs  ──►  Google Sheet tabs
-Staff tablet      ──(polls every 12 s)─►  Dashboard.gs                  Products, Orders, OrderHistory,
+Staff tablet      ──(polls every 12 s)─►  DashboardData.gs                Products, Orders, OrderHistory,
 Email buttons     ──?page=edit&token=─►   Code.gs → Customer page       Staff, Settings, Errors
 ```
 
@@ -117,7 +117,7 @@ If email buttons open the test version or nothing, set `WEB_APP_URL` (Settings) 
 | Feature | Where | Notes |
 |---|---|---|
 | Poll speed | `POLL_SECONDS` (10–60) | When nothing changed, the server answers from a version counter without reading the Sheet. |
-| **UPDATED AFTER DISPATCH** | `toStaffOrder_()` in `Dashboard.gs` | Shown when an order that is *Out for Delivery* has a Version above the last acknowledged one. It lists the difference between what was in the bag when it left (`DispatchedItemsJSON`) and now, plus any room change. **Acknowledge** sets `AckVersion`, makes the current contents the new baseline, and logs the staff member's name. |
+| **UPDATED AFTER DISPATCH** | `toStaffOrder_()` in `DashboardData.gs` | Shown when an order that is *Out for Delivery* has a Version above the last acknowledged one. It lists the difference between what was in the bag when it left (`DispatchedItemsJSON`) and now, plus any room change. **Acknowledge** sets `AckVersion`, makes the current contents the new baseline, and logs the staff member's name. |
 | Staff email on such edits | `STAFF_NOTIFY_EMAILS`, `NOTIFY_STAFF_ON_DISPATCHED_EDIT` | |
 | "Edited" badge | same | Quiet badge for edits made before dispatch. |
 | Route view, delivery sheet, bag labels | `DashboardJs.html` (`renderRoute`, `sheetNode`, `labelsNode`) | Print styles are at the end of `Styles.html`. Labels print two per row on Letter/A4. |

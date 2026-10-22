@@ -1,5 +1,5 @@
 /**
- * Dashboard.gs — staff-only data: live orders with change badges, prep
+ * DashboardData.gs — staff-only data: live orders with change badges, prep
  * summary, delivery route, history and change log, day summary, controls.
  * Every function starts with requireStaff_() (or owner/trigger for jobs).
  */

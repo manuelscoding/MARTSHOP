@@ -1,5 +1,14 @@
 # Cookie Cart changelog
 
+## 1.0.1
+
+- **Fix: the staff dashboard failed to open** ("Something went wrong"). The server file `Dashboard.gs` had the same name as the page `Dashboard.html`, and Apps Script requires unique file names, so the page could not be added. The server file is now **`DashboardData`**. To upgrade:
+  1. Rename the Script file `Dashboard` to `DashboardData` (or delete it and paste `src/DashboardData.gs` into a new Script file named `DashboardData`).
+  2. Make sure an HTML file named `Dashboard` exists with the contents of `src/Dashboard.html`.
+  3. Replace `Config.gs` (version number).
+  4. Publish a new version (Deploy → Manage deployments → Edit → New version).
+- The developer check now fails if two files share a name.
+
 ## 1.0.0
 
 First release.

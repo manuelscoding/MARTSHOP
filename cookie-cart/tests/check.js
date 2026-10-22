@@ -22,6 +22,15 @@ const fail = (msg) => failures.push(msg);
 const gsFiles = fs.readdirSync(src).filter(f => f.endsWith('.gs'));
 const htmlFiles = fs.readdirSync(src).filter(f => f.endsWith('.html'));
 
+// 0. Apps Script needs every file name to be unique, even between .gs and .html
+//    (a Dashboard.gs next to Dashboard.html cannot both exist in the editor).
+const seen = {};
+gsFiles.concat(htmlFiles).forEach(f => {
+  const base = f.replace(/\.(gs|html)$/, '').toLowerCase();
+  if (seen[base]) fail(f + ' and ' + seen[base] + ' have the same name. Apps Script cannot hold both; rename one.');
+  seen[base] = f;
+});
+
 // 1. Syntax
 gsFiles.forEach(f => {
   try { new vm.Script(fs.readFileSync(path.join(src, f), 'utf8'), { filename: f }); } catch (e) { fail(f + ': ' + e.message); }

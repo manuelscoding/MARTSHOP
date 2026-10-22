@@ -12,7 +12,7 @@
  */
 
 var CONFIG = Object.freeze({
-  APP_VERSION: '1.0.0',
+  APP_VERSION: '1.0.1',
 
   SHEETS: Object.freeze({
     PRODUCTS: 'Products',
